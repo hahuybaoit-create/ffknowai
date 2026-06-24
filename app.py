@@ -290,7 +290,7 @@ Bạn có thể hỏi các thông tin liên quan đến chính sách, quy địn
 if not CHROMA_DB_DIR.exists():
     st.error(
         "🚨 Cảnh báo: Chưa tìm thấy dữ liệu Vector DB. "
-        "Vui lòng chạy `python sync_documents.py` để tải và lập chỉ mục tài liệu."
+        "Vui lòng dùng các nút bên dưới để tải tài liệu SharePoint và tạo Vector DB."
     )
     _render_missing_data_actions("no_chroma")
     st.stop()
