@@ -65,13 +65,15 @@ On startup, `render_start.py` checks the persistent disk:
 1. If `/var/data/ff-know-ai/chroma_db` exists, it starts Streamlit immediately.
 2. If bundled `data_documents` or `chroma_db` exist in the repo, it copies them
    to the persistent disk.
-3. If no Vector DB exists but SharePoint credentials are configured, it syncs
-   SharePoint and builds the index.
-4. If no documents and no SharePoint credentials exist, startup fails with a
-   clear error.
+3. It starts Streamlit without rebuilding the Vector DB during service startup.
+   This is important on Render because the web service must bind to `$PORT`
+   quickly or the deploy is marked as failed.
+4. If no Vector DB exists yet, open the app and use the SharePoint sync/index
+   button in the sidebar.
 
-The first deploy can be slow if it needs to download SharePoint documents and
-rebuild embeddings.
+The first Vector DB creation can be slow because it downloads SharePoint
+documents and rebuilds embeddings, but it should happen after the web service is
+already online.
 
 If the app opens but shows **Chưa tìm thấy dữ liệu Vector DB**, confirm that the
 Render service is using `python render_start.py` as its start command and that

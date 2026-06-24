@@ -18,7 +18,7 @@ services:
       - key: STREAMLIT_BROWSER_GATHER_USAGE_STATS
         value: "false"
       - key: AUTO_SYNC_ON_START
-        value: "true"
+        value: "false"
       - key: SHAREPOINT_SKIP_MISSING_FOLDERS
         value: "true"
       - key: GEMINI_API_KEY
