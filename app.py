@@ -288,10 +288,16 @@ Bạn có thể hỏi các thông tin liên quan đến chính sách, quy địn
 )
 
 if not CHROMA_DB_DIR.exists():
-    st.error(
-        "🚨 Cảnh báo: Chưa tìm thấy dữ liệu Vector DB. "
-        "Vui lòng dùng các nút bên dưới để tải tài liệu SharePoint và tạo Vector DB."
-    )
+    if DATA_DIR.exists() and any(DATA_DIR.iterdir()):
+        st.warning(
+            "Đã có tài liệu SharePoint trên Render nhưng chưa có Vector DB. "
+            "Hãy bấm `Tạo Vector DB từ tài liệu đã tải` để hoàn tất bước lập chỉ mục."
+        )
+    else:
+        st.error(
+            "🚨 Cảnh báo: Chưa tìm thấy dữ liệu Vector DB. "
+            "Vui lòng dùng các nút bên dưới để tải tài liệu SharePoint và tạo Vector DB."
+        )
     _render_missing_data_actions("no_chroma")
     st.stop()
 
