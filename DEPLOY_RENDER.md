@@ -21,10 +21,16 @@ Do not commit `.env`.
 The service uses:
 
 - Runtime: Python
+- Python version: 3.11.9
 - Region: Singapore
 - Build command: `pip install -r requirements.txt`
 - Start command: `python render_start.py`
 - Persistent disk: `/var/data`
+
+Render's default Python version can change for newly created services. This repo
+pins Python with both `PYTHON_VERSION=3.11.9` in `render.yaml` and a
+`.python-version` file so dependencies such as `pandas` install from compatible
+prebuilt wheels instead of compiling from source.
 
 ## 3. Add secret environment variables
 

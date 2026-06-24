@@ -11,6 +11,8 @@ services:
       mountPath: /var/data
       sizeGB: 1
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
       - key: FF_APP_DATA_ROOT
         value: /var/data/ff-know-ai
       - key: STREAMLIT_BROWSER_GATHER_USAGE_STATS
