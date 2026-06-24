@@ -27,6 +27,10 @@ The service uses:
 - Start command: `python render_start.py`
 - Persistent disk: `/var/data`
 
+Persistent disks require a paid Render web service. If the service is still on
+the Free plan, Vector DB files created at runtime can disappear after a restart
+or redeploy.
+
 Render's default Python version can change for newly created services. This repo
 pins Python with both `PYTHON_VERSION=3.11.9` in `render.yaml` and a
 `.python-version` file so dependencies such as `pandas` install from compatible
@@ -68,6 +72,12 @@ On startup, `render_start.py` checks the persistent disk:
 
 The first deploy can be slow if it needs to download SharePoint documents and
 rebuild embeddings.
+
+If the app opens but shows **Chưa tìm thấy dữ liệu Vector DB**, confirm that the
+Render service is using `python render_start.py` as its start command and that
+all secret environment variables are set. The app also shows a
+**Tạo Vector DB từ SharePoint** button when SharePoint credentials are present,
+so you can trigger the initial sync directly from the web UI.
 
 ## 5. Updating documents after deploy
 

@@ -176,6 +176,37 @@ def _render_downloads(downloads: list[dict[str, str]], key_prefix: str) -> None:
         st.caption(item["relative_path"])
 
 
+def _has_sharepoint_credentials() -> bool:
+    required = (
+        "SHAREPOINT_CLIENT_ID",
+        "SHAREPOINT_TENANT_ID",
+        "SHAREPOINT_CLIENT_SECRET",
+    )
+    return all(os.getenv(name) for name in required)
+
+
+def _render_missing_data_actions(location: str) -> None:
+    if not _has_sharepoint_credentials():
+        st.info(
+            "Chưa thấy đủ thông tin SharePoint trên Render. Hãy thêm "
+            "`SHAREPOINT_CLIENT_ID`, `SHAREPOINT_TENANT_ID`, "
+            "`SHAREPOINT_CLIENT_SECRET` và `GEMINI_API_KEY` trong Environment."
+        )
+        return
+
+    if st.button("Tạo Vector DB từ SharePoint", key=f"sync_missing_{location}"):
+        with st.spinner("Đang tải tài liệu SharePoint và tạo Vector DB..."):
+            from sync_documents import sync_documents
+
+            try:
+                sync_documents(force_index=True)
+            except Exception as exc:
+                st.error(f"Chưa tạo được Vector DB: {exc}")
+            else:
+                st.success("Đã tạo xong Vector DB. Trang sẽ tải lại.")
+                st.rerun()
+
+
 def _maybe_auto_sync() -> None:
     if os.getenv("AUTO_SYNC_ON_START", "false").lower() not in {"1", "true", "yes"}:
         return
@@ -220,6 +251,7 @@ if not CHROMA_DB_DIR.exists():
         "🚨 Cảnh báo: Chưa tìm thấy dữ liệu Vector DB. "
         "Vui lòng chạy `python sync_documents.py` để tải và lập chỉ mục tài liệu."
     )
+    _render_missing_data_actions("no_chroma")
     st.stop()
 
 if not DATA_DIR.exists():
@@ -286,6 +318,8 @@ with st.sidebar:
             else:
                 st.success("Đã cập nhật xong. Trang sẽ tải lại.")
                 st.rerun()
+
+    _render_missing_data_actions("sidebar")
 
     if st.button("Chỉ tải tài liệu từ SharePoint"):
         with st.spinner("Đang tải tài liệu mới, bỏ qua rebuild Vector DB..."):
