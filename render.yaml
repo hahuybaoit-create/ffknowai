@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: ff-know-ai
+    runtime: python
+    region: singapore
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python render_start.py
+    disk:
+      name: ff-know-ai-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: FF_APP_DATA_ROOT
+        value: /var/data/ff-know-ai
+      - key: STREAMLIT_BROWSER_GATHER_USAGE_STATS
+        value: "false"
+      - key: AUTO_SYNC_ON_START
+        value: "false"
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: SHAREPOINT_CLIENT_ID
+        sync: false
+      - key: SHAREPOINT_TENANT_ID
+        sync: false
+      - key: SHAREPOINT_CLIENT_SECRET
+        sync: false
+      - key: SHAREPOINT_HOST
+        value: flexfitcom.sharepoint.com
+      - key: SHAREPOINT_SITE_PATH
+        value: /sites/Intranet
+      - key: SHAREPOINT_SITE_NAME
+        value: Intranet
