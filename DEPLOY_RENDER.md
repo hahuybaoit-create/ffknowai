@@ -79,6 +79,14 @@ all secret environment variables are set. The app also shows a
 **Tạo Vector DB từ SharePoint** button when SharePoint credentials are present,
 so you can trigger the initial sync directly from the web UI.
 
+If Render logs show **Không tìm thấy thư mục SharePoint**, the app can
+authenticate to Microsoft Graph but the configured folder path does not exist
+from the app's permissions. Check the folder names in `SOURCE_FOLDERS` inside
+`sharepoint_loader.py`, especially the first source:
+`Quy chế, chính sách bộ phận/Mô hình BU`. The sync skips missing folders by
+default with `SHAREPOINT_SKIP_MISSING_FOLDERS=true` and prints the top-level
+folders it can see in each SharePoint drive.
+
 ## 5. Updating documents after deploy
 
 Use the Streamlit sidebar button **Cap nhat tai lieu tu SharePoint** to sync

@@ -142,6 +142,10 @@ def get_drives(access_token: str, site_id: str) -> list[dict]:
     return _graph_get(url, access_token).get("value", [])
 
 
+def _truthy_env(name: str, default: str = "false") -> bool:
+    return os.getenv(name, default).lower() in {"1", "true", "yes"}
+
+
 def _relative_drive_path(sharepoint_path: str) -> str:
     marker = "/Shared Documents/"
     if marker not in sharepoint_path:
@@ -159,6 +163,35 @@ def _get_folder_item(access_token: str, site_id: str, drives: list[dict], relati
         except requests.HTTPError as exc:
             errors.append(f"{drive.get('name')}: {exc.response.status_code}")
     raise RuntimeError(f"Không tìm thấy thư mục SharePoint '{relative_path}'. Drives đã thử: {', '.join(errors)}")
+
+
+def _drive_root_preview(access_token: str, site_id: str, drives: list[dict]) -> str:
+    previews = []
+    for drive in drives:
+        drive_name = drive.get("name", "unknown")
+        url = f"{GRAPH_ROOT}/sites/{site_id}/drives/{drive['id']}/root/children?$top=20"
+        try:
+            children = _graph_get(url, access_token).get("value", [])
+        except requests.HTTPError as exc:
+            previews.append(f"{drive_name}: khong doc duoc root ({exc.response.status_code})")
+            continue
+
+        names = [item.get("name", "unnamed") for item in children]
+        previews.append(f"{drive_name}: {', '.join(names) if names else '(trong)'}")
+    return " | ".join(previews)
+
+
+def _get_folder_item_checked(
+    access_token: str,
+    site_id: str,
+    drives: list[dict],
+    relative_path: str,
+) -> tuple[str, dict]:
+    try:
+        return _get_folder_item(access_token, site_id, drives, relative_path)
+    except RuntimeError as exc:
+        root_preview = _drive_root_preview(access_token, site_id, drives)
+        raise RuntimeError(f"{exc}. Thu muc cap dau dang thay: {root_preview}") from exc
 
 
 def _iter_children(access_token: str, site_id: str, drive_id: str, folder_id: str) -> list[dict]:
@@ -259,6 +292,7 @@ def download_documents(download_dir: str | Path = DEFAULT_DOWNLOAD_DIR, clean: b
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "sources": SOURCE_FOLDERS,
         "files": [],
+        "missing_sources": [],
     }
 
     total_files = 0
@@ -268,7 +302,20 @@ def download_documents(download_dir: str | Path = DEFAULT_DOWNLOAD_DIR, clean: b
         relative_path = _relative_drive_path(sharepoint_path)
         source_dir = work_dir / _safe_name(source["label"])
         print(f"Đang xử lý nguồn: {source['label']} ({relative_path})")
-        drive_id, folder_item = _get_folder_item(token, site_id, drives, relative_path)
+        try:
+            drive_id, folder_item = _get_folder_item_checked(token, site_id, drives, relative_path)
+        except RuntimeError as exc:
+            if not _truthy_env("SHAREPOINT_SKIP_MISSING_FOLDERS", "true"):
+                raise
+            print(f"Canh bao: bo qua nguon SharePoint '{source['label']}': {exc}")
+            manifest["missing_sources"].append(
+                {
+                    "label": source["label"],
+                    "relative_path": relative_path,
+                    "error": str(exc),
+                }
+            )
+            continue
         total_files += _download_folder(
             token,
             site_id,

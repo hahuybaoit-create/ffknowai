@@ -19,6 +19,8 @@ services:
         value: "false"
       - key: AUTO_SYNC_ON_START
         value: "true"
+      - key: SHAREPOINT_SKIP_MISSING_FOLDERS
+        value: "true"
       - key: GEMINI_API_KEY
         sync: false
       - key: SHAREPOINT_CLIENT_ID

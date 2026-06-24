@@ -44,7 +44,11 @@ def _ensure_runtime_data() -> None:
         print("No Vector DB found. Syncing SharePoint and building index...", flush=True)
         from sync_documents import sync_documents
 
-        sync_documents(force_index=True)
+        try:
+            sync_documents(force_index=True)
+        except Exception as exc:
+            print(f"Initial SharePoint sync failed: {exc}", flush=True)
+            print("Starting the app without Vector DB so the issue is visible in the UI.", flush=True)
         return
 
     if DATA_DIR.exists() and any(DATA_DIR.iterdir()):

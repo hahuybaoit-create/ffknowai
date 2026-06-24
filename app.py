@@ -222,7 +222,10 @@ def _maybe_auto_sync() -> None:
     with st.spinner("Đang tự cập nhật tài liệu từ SharePoint..."):
         from sync_documents import sync_documents
 
-        sync_documents()
+        try:
+            sync_documents()
+        except Exception as exc:
+            st.warning(f"Chưa tự cập nhật được tài liệu từ SharePoint: {exc}")
 
 
 st.set_page_config(page_title="FF - Know AI", page_icon="🤖", layout="wide")
