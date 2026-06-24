@@ -194,6 +194,29 @@ def _render_missing_data_actions(location: str) -> None:
         )
         return
 
+    st.info(
+        "Lần đầu tạo Vector DB có thể mất nhiều phút vì app phải tải tài liệu "
+        "SharePoint rồi tạo embeddings bằng Gemini. Nếu chạy trên Render Free, "
+        "hãy giữ tab này mở cho đến khi hoàn tất."
+    )
+
+    has_downloaded_docs = DATA_DIR.exists() and any(DATA_DIR.iterdir())
+
+    if has_downloaded_docs and st.button(
+        "Tạo Vector DB từ tài liệu đã tải",
+        key=f"index_downloaded_{location}",
+    ):
+        with st.spinner("Đang tạo Vector DB từ tài liệu đã tải..."):
+            from sync_documents import sync_documents
+
+            try:
+                sync_documents(force_index=True, skip_download=True)
+            except Exception as exc:
+                st.error(f"Chưa tạo được Vector DB: {exc}")
+            else:
+                st.success("Đã tạo xong Vector DB. Trang sẽ tải lại.")
+                st.rerun()
+
     if st.button("Tạo Vector DB từ SharePoint", key=f"sync_missing_{location}"):
         with st.spinner("Đang tải tài liệu SharePoint và tạo Vector DB..."):
             from sync_documents import sync_documents
@@ -204,6 +227,21 @@ def _render_missing_data_actions(location: str) -> None:
                 st.error(f"Chưa tạo được Vector DB: {exc}")
             else:
                 st.success("Đã tạo xong Vector DB. Trang sẽ tải lại.")
+                st.rerun()
+
+    if st.button("Chỉ tải tài liệu từ SharePoint", key=f"download_missing_{location}"):
+        with st.spinner("Đang tải tài liệu SharePoint, chưa tạo Vector DB..."):
+            from sync_documents import sync_documents
+
+            try:
+                sync_documents(skip_index=True)
+            except Exception as exc:
+                st.error(f"Chưa tải được tài liệu: {exc}")
+            else:
+                st.success(
+                    "Đã tải tài liệu xong. Bạn có thể bấm "
+                    "'Tạo Vector DB từ tài liệu đã tải'."
+                )
                 st.rerun()
 
 
