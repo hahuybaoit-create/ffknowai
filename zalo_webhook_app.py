@@ -2,7 +2,7 @@ import logging
 import os
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 
 from zalo_oa import answer_zalo_message, parse_incoming_message, verify_webhook_secret
@@ -11,6 +11,13 @@ logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger(__name__)
 
 app = FastAPI(title="FF Know AI - Zalo OA Webhook")
+
+
+def _answer_message_background(message: Any) -> None:
+    try:
+        answer_zalo_message(message)
+    except Exception:
+        LOGGER.exception("Failed to process Zalo OA message in background")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -92,6 +99,7 @@ def zalo_webhook_check(
 @app.post("/zalo/webhook")
 async def zalo_webhook(
     request: Request,
+    background_tasks: BackgroundTasks,
     secret: str | None = Query(default=None),
 ) -> dict[str, Any]:
     if not verify_webhook_secret(secret):
@@ -103,10 +111,11 @@ async def zalo_webhook(
         LOGGER.info("Ignored unsupported Zalo OA webhook payload: %s", payload)
         return {"status": "ignored"}
 
-    try:
-        answer_zalo_message(message)
-    except Exception as exc:
-        LOGGER.exception("Failed to process Zalo OA webhook")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    return {"status": "ok"}
+    LOGGER.info(
+        "Accepted Zalo OA webhook event_name=%s user_id=%s text_len=%s",
+        message.event_name,
+        message.user_id,
+        len(message.text),
+    )
+    background_tasks.add_task(_answer_message_background, message)
+    return {"status": "accepted"}

@@ -51,18 +51,36 @@ def parse_incoming_message(payload: dict[str, Any]) -> ZaloIncomingMessage | Non
     message = payload.get("message") or {}
     sender = payload.get("sender") or {}
 
-    user_id = str(sender.get("id") or payload.get("user_id") or "")
-    text = str(message.get("text") or payload.get("text") or "").strip()
+    user_id = str(
+        sender.get("id")
+        or sender.get("user_id")
+        or payload.get("user_id")
+        or payload.get("user_id_by_app")
+        or ""
+    )
+    text = str(
+        message.get("text")
+        or message.get("content")
+        or payload.get("text")
+        or payload.get("content")
+        or ""
+    ).strip()
 
     if not user_id or not text:
+        LOGGER.info(
+            "Ignored Zalo payload because user_id/text is missing. event_name=%s keys=%s",
+            event_name,
+            sorted(payload.keys()),
+        )
         return None
 
     allowed_events = {
-        event.strip()
+        event.strip().lower()
         for event in _env("ZALO_ALLOWED_EVENTS", "user_send_text").split(",")
         if event.strip()
     }
-    if allowed_events and event_name and event_name not in allowed_events:
+    if allowed_events and event_name and event_name.lower() not in allowed_events:
+        LOGGER.info("Ignored Zalo event_name=%s. allowed_events=%s", event_name, allowed_events)
         return None
 
     return ZaloIncomingMessage(event_name=event_name, user_id=user_id, text=text)
@@ -102,7 +120,15 @@ def send_text_message(user_id: str, text: str) -> None:
             json=payload,
             timeout=30,
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.HTTPError:
+            LOGGER.error(
+                "Zalo send message failed. status=%s body=%s",
+                response.status_code,
+                response.text,
+            )
+            raise
 
 
 def answer_zalo_message(message: ZaloIncomingMessage) -> str:
