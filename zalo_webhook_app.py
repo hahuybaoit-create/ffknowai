@@ -1,7 +1,9 @@
 import logging
+import os
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
 
 from zalo_oa import answer_zalo_message, parse_incoming_message, verify_webhook_secret
 
@@ -11,14 +13,31 @@ LOGGER = logging.getLogger(__name__)
 app = FastAPI(title="FF Know AI - Zalo OA Webhook")
 
 
-@app.get("/")
-def root() -> dict[str, str]:
-    return {
-        "service": "FF Know AI - Zalo OA Webhook",
-        "status": "ok",
-        "health_check": "/healthz",
-        "webhook": "/zalo/webhook",
-    }
+@app.get("/", response_class=HTMLResponse)
+def root() -> str:
+    verify_content = os.getenv("ZALO_VERIFY_META_CONTENT", "").strip()
+    verify_meta = ""
+    if verify_content:
+        verify_meta = (
+            '<meta name="zalo-platform-site-verification" '
+            f'content="{verify_content}" />'
+        )
+
+    return f"""<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  {verify_meta}
+  <title>FF Know AI - Zalo OA Webhook</title>
+</head>
+<body>
+  <h1>FF Know AI - Zalo OA Webhook</h1>
+  <p>Status: ok</p>
+  <p>Health check: <a href="/healthz">/healthz</a></p>
+  <p>Webhook: /zalo/webhook</p>
+</body>
+</html>"""
 
 
 @app.get("/healthz")

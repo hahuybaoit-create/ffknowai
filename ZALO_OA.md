@@ -9,6 +9,7 @@ ZALO_OA_ACCESS_TOKEN="..."
 ZALO_WEBHOOK_SECRET="chuoi-bi-mat-tu-dat"
 ZALO_ALLOWED_EVENTS="user_send_text"
 ZALO_MAX_REPLY_CHARS=1800
+ZALO_VERIFY_META_CONTENT="noi-dung-content-zalo-cap"
 ```
 
 `ZALO_WEBHOOK_SECRET` la chuoi bi mat tu dat. Khi cau hinh webhook tren Zalo OA, them secret vao query string de chan request khong mong muon.
@@ -32,6 +33,42 @@ Webhook URL:
 ```text
 https://<domain-cua-ban>/zalo/webhook?secret=<ZALO_WEBHOOK_SECRET>
 ```
+
+## Xac thuc domain Zalo
+
+Neu dung domain Render dang co, vi du:
+
+```text
+ffknowai-1.onrender.com
+```
+
+nen chon cach xac thuc bang the meta trong Zalo Developers.
+
+Zalo se hien mot the tuong tu:
+
+```html
+<meta name="zalo-platform-site-verification" content="..." />
+```
+
+Hay copy rieng gia tri trong `content="..."` va dat vao bien moi truong:
+
+```env
+ZALO_VERIFY_META_CONTENT="..."
+```
+
+Sau khi deploy lai, mo trang goc:
+
+```text
+https://ffknowai-1.onrender.com/
+```
+
+Trang HTML se tu chen meta:
+
+```html
+<meta name="zalo-platform-site-verification" content="..." />
+```
+
+Sau do quay lai Zalo Developers va bam `Xac thuc`.
 
 Khi nguoi dung nhan tin text cho OA, webhook se:
 
