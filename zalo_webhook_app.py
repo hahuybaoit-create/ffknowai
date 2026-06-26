@@ -6,6 +6,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 
 from zalo_oa import answer_zalo_message, parse_incoming_message, verify_webhook_secret
+from paths import CHROMA_DB_DIR, DATA_DIR
 
 logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger(__name__)
@@ -50,6 +51,26 @@ def root() -> str:
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/debugz")
+def debugz(
+    secret: str | None = Query(default=None),
+) -> dict[str, Any]:
+    if not verify_webhook_secret(secret):
+        raise HTTPException(status_code=401, detail="Invalid webhook secret")
+    return {
+        "status": "ok",
+        "data_dir": str(DATA_DIR),
+        "data_dir_exists": DATA_DIR.exists(),
+        "chroma_db_dir": str(CHROMA_DB_DIR),
+        "chroma_db_exists": CHROMA_DB_DIR.exists(),
+        "chroma_db_files": sorted(path.name for path in CHROMA_DB_DIR.iterdir())
+        if CHROMA_DB_DIR.exists()
+        else [],
+        "zalo_token_set": bool(os.getenv("ZALO_OA_ACCESS_TOKEN")),
+        "gemini_key_set": bool(os.getenv("GEMINI_API_KEY")),
+    }
 
 
 @app.get("/zalo/oauth/callback", response_class=HTMLResponse)

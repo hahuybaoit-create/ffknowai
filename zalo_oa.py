@@ -109,11 +109,17 @@ def send_text_message(user_id: str, text: str) -> None:
         "Content-Type": "application/json",
     }
 
-    for part in _split_reply(text):
+    for index, part in enumerate(_split_reply(text), start=1):
         payload = {
             "recipient": {"user_id": user_id},
             "message": {"text": part},
         }
+        LOGGER.info(
+            "Sending Zalo OA message part=%s user_id=%s text_len=%s",
+            index,
+            user_id,
+            len(part),
+        )
         response = requests.post(
             ZALO_SEND_MESSAGE_URL,
             headers=headers,
@@ -129,10 +135,23 @@ def send_text_message(user_id: str, text: str) -> None:
                 response.text,
             )
             raise
+        try:
+            data = response.json()
+        except ValueError:
+            data = {}
+        if data.get("error") not in (None, 0, "0"):
+            LOGGER.error("Zalo send message returned API error: %s", data)
+            raise RuntimeError(f"Zalo send message returned API error: {data}")
+        LOGGER.info("Zalo OA message sent successfully. response=%s", data)
 
 
 def answer_zalo_message(message: ZaloIncomingMessage) -> str:
     LOGGER.info("Answering Zalo OA message from user_id=%s", message.user_id)
     answer = ask_agent(message.text)
+    LOGGER.info(
+        "AI answer generated for Zalo user_id=%s answer_len=%s",
+        message.user_id,
+        len(answer),
+    )
     send_text_message(message.user_id, answer)
     return answer
