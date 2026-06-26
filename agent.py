@@ -155,6 +155,8 @@ def _is_numbered_list_query(query: str) -> bool:
 
 def _is_tam_phap_10_chieu_query(query: str) -> bool:
     normalized = _normalize_text(query)
+    if "10 chieu" in normalized or "chieu thuc" in normalized:
+        return True
     return (
         ("10" in normalized or "muoi" in normalized)
         and ("chieu" in normalized or "tam phap" in normalized)
@@ -163,8 +165,10 @@ def _is_tam_phap_10_chieu_query(query: str) -> bool:
 
 def _is_tam_phap_bi_kip_query(query: str) -> bool:
     normalized = _normalize_text(query)
+    if "bi kip" in normalized:
+        return True
     return (
-        ("bi kip" in normalized or "quan ly" in normalized or "lanh dao" in normalized)
+        ("quan ly" in normalized or "lanh dao" in normalized)
         and ("tam phap" in normalized or "flexfit" in normalized or "8" in normalized)
     )
 
@@ -258,21 +262,11 @@ def get_neighbor_documents(
 
 
 def get_tam_phap_action_documents(vector_store: Chroma) -> list[Document]:
-    return get_documents_by_source_pages(vector_store, ("flexfit", "tam phap"), {1, 2})
+    return get_documents_by_source_pages(vector_store, ("flexfit", "tam phap"), set(range(10)))
 
 
 def get_tam_phap_management_documents(vector_store: Chroma) -> list[Document]:
-    docs = get_documents_by_source_pages(vector_store, ("flexfit", "tam phap"), {2, 3, 4})
-    filtered_docs = []
-    for doc in docs:
-        page_number = _page_number(doc.metadata)
-        normalized_content = _normalize_text(doc.page_content)
-        if page_number != 2 or any(
-            term in normalized_content
-            for term in ("bi kip", "lanh dao", "leadership", "chuyen mon", "quan ly")
-        ):
-            filtered_docs.append(doc)
-    return filtered_docs
+    return get_documents_by_source_pages(vector_store, ("flexfit", "tam phap"), set(range(10)))
 
 
 def get_vector_store() -> Chroma:
@@ -372,7 +366,7 @@ def get_relevant_documents(query: str) -> list[Document]:
     seed_docs = _merge_documents(priority_docs, keyword_docs, vector_docs)
     expanded_docs = []
     if _is_numbered_list_query(query) and not priority_docs:
-        expanded_docs = get_neighbor_documents(vector_store, seed_docs[:5], page_radius=1)
+        expanded_docs = get_neighbor_documents(vector_store, seed_docs[:5], page_radius=2)
 
     return _merge_documents(priority_docs, expanded_docs, keyword_docs, vector_docs)[:32]
 

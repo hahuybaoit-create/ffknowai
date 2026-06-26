@@ -47,23 +47,60 @@ SOURCE_FOLDERS = [
     {
         "name": "co_che_luong",
         "label": "Cơ chế lương",
-        "sharepoint_url": "https://flexfitcom-my.sharepoint.com/shared?id=%2Fsites%2FIntranet%2FShared%20Documents%2FQuy%20ch%E1%BA%BF%2C%20ch%C3%ADnh%20s%C3%A1ch%20b%E1%BB%99%20ph%E1%BA%ADn%2FM%C3%B4%20h%C3%ACnh%20BU&listurl=https%3A%2F%2Fflexfitcom%2Esharepoint%2Ecom%2Fsites%2FIntranet%2FShared%20Documents&viewid=17f7279f%2Dc3d4%2D4b19%2D8e2b%2D7a728ce1fdd6",
+        "sharepoint_url": os.getenv(
+            "SHAREPOINT_CO_CHE_LUONG_URL",
+            "https://flexfitcom-my.sharepoint.com/shared?id=%2Fsites%2FIntranet%2FShared%20Documents%2FQuy%20ch%E1%BA%BF%2C%20ch%C3%ADnh%20s%C3%A1ch%20b%E1%BB%99%20ph%E1%BA%ADn%2FM%C3%B4%20h%C3%ACnh%20BU&listurl=https%3A%2F%2Fflexfitcom%2Esharepoint%2Ecom%2Fsites%2FIntranet%2FShared%20Documents&viewid=17f7279f%2Dc3d4%2D4b19%2D8e2b%2D7a728ce1fdd6",
+        ),
     },
     {
         "name": "quy_dinh_chung",
         "label": "Quy định chung",
-        "sharepoint_url": "https://flexfitcom-my.sharepoint.com/shared?id=%2Fsites%2FIntranet%2FShared%20Documents%2FQuy%20ch%E1%BA%BF%20v%C3%A0%20ch%C3%ADnh%20s%C3%A1ch%20chung%20c%C3%B4ng%20ty&listurl=https%3A%2F%2Fflexfitcom%2Esharepoint%2Ecom%2Fsites%2FIntranet%2FShared%20Documents&viewid=17f7279f%2Dc3d4%2D4b19%2D8e2b%2D7a728ce1fdd6",
+        "sharepoint_url": os.getenv(
+            "SHAREPOINT_QUY_DINH_CHUNG_URL",
+            "https://flexfitcom-my.sharepoint.com/shared?id=%2Fsites%2FIntranet%2FShared%20Documents%2FQuy%20ch%E1%BA%BF%20v%C3%A0%20ch%C3%ADnh%20s%C3%A1ch%20chung%20c%C3%B4ng%20ty&listurl=https%3A%2F%2Fflexfitcom%2Esharepoint%2Ecom%2Fsites%2FIntranet%2FShared%20Documents&viewid=17f7279f%2Dc3d4%2D4b19%2D8e2b%2D7a728ce1fdd6",
+        ),
     },
     {
         "name": "bieu_mau",
         "label": "Biểu mẫu",
-        "sharepoint_url": "https://flexfitcom-my.sharepoint.com/shared?id=%2Fsites%2FIntranet%2FShared%20Documents%2FC%C3%A1c%20bi%E1%BB%83u%20m%E1%BA%ABu%20th%C6%B0%E1%BB%9Dng%20d%C3%B9ng&listurl=https%3A%2F%2Fflexfitcom%2Esharepoint%2Ecom%2Fsites%2FIntranet%2FShared%20Documents&viewid=17f7279f%2Dc3d4%2D4b19%2D8e2b%2D7a728ce1fdd6",
+        "sharepoint_url": os.getenv(
+            "SHAREPOINT_BIEU_MAU_URL",
+            "https://flexfitcom-my.sharepoint.com/shared?id=%2Fsites%2FIntranet%2FShared%20Documents%2FC%C3%A1c%20bi%E1%BB%83u%20m%E1%BA%ABu%20th%C6%B0%E1%BB%9Dng%20d%C3%B9ng&listurl=https%3A%2F%2Fflexfitcom%2Esharepoint%2Ecom%2Fsites%2FIntranet%2FShared%20Documents&viewid=17f7279f%2Dc3d4%2D4b19%2D8e2b%2D7a728ce1fdd6",
+        ),
     },
     {
         "name": "bo_kit_nhan_su_moi",
         "label": "Bộ kit nhân sự mới",
-        "sharepoint_url": "https://flexfitcom-my.sharepoint.com/shared?id=%2Fsites%2FIntranet%2FShared%20Documents%2FB%E1%BB%99%20kit%20nh%C3%A2n%20vi%C3%AAn%20m%E1%BB%9Bi&listurl=https%3A%2F%2Fflexfitcom%2Esharepoint%2Ecom%2Fsites%2FIntranet%2FShared%20Documents&viewid=17f7279f%2Dc3d4%2D4b19%2D8e2b%2D7a728ce1fdd6",
+        "sharepoint_url": os.getenv(
+            "SHAREPOINT_BO_KIT_NHAN_SU_MOI_URL",
+            "https://flexfitcom-my.sharepoint.com/shared?id=%2Fsites%2FIntranet%2FShared%20Documents%2FB%E1%BB%99%20kit%20nh%C3%A2n%20vi%C3%AAn%20m%E1%BB%9Bi&listurl=https%3A%2F%2Fflexfitcom%2Esharepoint%2Ecom%2Fsites%2FIntranet%2FShared%20Documents&viewid=17f7279f%2Dc3d4%2D4b19%2D8e2b%2D7a728ce1fdd6",
+        ),
     },
+]
+
+
+SOURCE_PATH_ENV_VARS = {
+    "co_che_luong": "SHAREPOINT_CO_CHE_LUONG_PATH",
+    "quy_dinh_chung": "SHAREPOINT_QUY_DINH_CHUNG_PATH",
+    "bieu_mau": "SHAREPOINT_BIEU_MAU_PATH",
+    "bo_kit_nhan_su_moi": "SHAREPOINT_BO_KIT_NHAN_SU_MOI_PATH",
+}
+
+for source in SOURCE_FOLDERS:
+    configured_path = os.getenv(SOURCE_PATH_ENV_VARS.get(source["name"], ""))
+    if configured_path:
+        source["sharepoint_path"] = configured_path
+
+SOURCE_FOLDERS = [
+    {
+        "name": "flexfit",
+        "label": "Flexfit",
+        "sharepoint_path": os.getenv("SHAREPOINT_FLEXFIT_PATH", "Flexfit"),
+        "sharepoint_url": os.getenv(
+            "SHAREPOINT_FLEXFIT_URL",
+            "https://flexfitcom-my.sharepoint.com/shared?id=%2Fsites%2FIntranet%2FShared%20Documents%2FFlexfit&listurl=https%3A%2F%2Fflexfitcom%2Esharepoint%2Ecom%2Fsites%2FIntranet%2FShared%20Documents&viewid=17f7279f%2Dc3d4%2D4b19%2D8e2b%2D7a728ce1fdd6",
+        ),
+    }
 ]
 
 

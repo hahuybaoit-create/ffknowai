@@ -1,0 +1,112 @@
+import logging
+import os
+from dataclasses import dataclass
+from typing import Any
+
+import requests
+from dotenv import load_dotenv
+
+from agent import ask_agent
+
+load_dotenv()
+
+LOGGER = logging.getLogger(__name__)
+ZALO_SEND_MESSAGE_URL = "https://openapi.zalo.me/v3.0/oa/message/cs"
+
+
+@dataclass
+class ZaloIncomingMessage:
+    event_name: str
+    user_id: str
+    text: str
+
+
+def _env(name: str, default: str = "") -> str:
+    return os.getenv(name, default).strip().strip('"').strip("'")
+
+
+def _access_token() -> str:
+    token = _env("ZALO_OA_ACCESS_TOKEN")
+    if not token:
+        raise RuntimeError("Missing ZALO_OA_ACCESS_TOKEN")
+    return token
+
+
+def _max_reply_chars() -> int:
+    try:
+        return max(200, int(_env("ZALO_MAX_REPLY_CHARS", "1800")))
+    except ValueError:
+        return 1800
+
+
+def verify_webhook_secret(received_secret: str | None) -> bool:
+    expected_secret = _env("ZALO_WEBHOOK_SECRET")
+    if not expected_secret:
+        return True
+    return bool(received_secret) and received_secret == expected_secret
+
+
+def parse_incoming_message(payload: dict[str, Any]) -> ZaloIncomingMessage | None:
+    event_name = str(payload.get("event_name") or "")
+    message = payload.get("message") or {}
+    sender = payload.get("sender") or {}
+
+    user_id = str(sender.get("id") or payload.get("user_id") or "")
+    text = str(message.get("text") or payload.get("text") or "").strip()
+
+    if not user_id or not text:
+        return None
+
+    allowed_events = {
+        event.strip()
+        for event in _env("ZALO_ALLOWED_EVENTS", "user_send_text").split(",")
+        if event.strip()
+    }
+    if allowed_events and event_name and event_name not in allowed_events:
+        return None
+
+    return ZaloIncomingMessage(event_name=event_name, user_id=user_id, text=text)
+
+
+def _split_reply(text: str) -> list[str]:
+    limit = _max_reply_chars()
+    if len(text) <= limit:
+        return [text]
+
+    parts: list[str] = []
+    remaining = text
+    while remaining:
+        chunk = remaining[:limit]
+        split_at = max(chunk.rfind("\n\n"), chunk.rfind("\n"), chunk.rfind(". "))
+        if split_at < limit // 2:
+            split_at = limit
+        parts.append(remaining[:split_at].strip())
+        remaining = remaining[split_at:].strip()
+    return [part for part in parts if part]
+
+
+def send_text_message(user_id: str, text: str) -> None:
+    headers = {
+        "access_token": _access_token(),
+        "Content-Type": "application/json",
+    }
+
+    for part in _split_reply(text):
+        payload = {
+            "recipient": {"user_id": user_id},
+            "message": {"text": part},
+        }
+        response = requests.post(
+            ZALO_SEND_MESSAGE_URL,
+            headers=headers,
+            json=payload,
+            timeout=30,
+        )
+        response.raise_for_status()
+
+
+def answer_zalo_message(message: ZaloIncomingMessage) -> str:
+    LOGGER.info("Answering Zalo OA message from user_id=%s", message.user_id)
+    answer = ask_agent(message.text)
+    send_text_message(message.user_id, answer)
+    return answer

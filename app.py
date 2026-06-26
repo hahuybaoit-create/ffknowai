@@ -176,75 +176,6 @@ def _render_downloads(downloads: list[dict[str, str]], key_prefix: str) -> None:
         st.caption(item["relative_path"])
 
 
-def _has_sharepoint_credentials() -> bool:
-    required = (
-        "SHAREPOINT_CLIENT_ID",
-        "SHAREPOINT_TENANT_ID",
-        "SHAREPOINT_CLIENT_SECRET",
-    )
-    return all(os.getenv(name) for name in required)
-
-
-def _render_missing_data_actions(location: str) -> None:
-    if not _has_sharepoint_credentials():
-        st.info(
-            "Chưa thấy đủ thông tin SharePoint trên Render. Hãy thêm "
-            "`SHAREPOINT_CLIENT_ID`, `SHAREPOINT_TENANT_ID`, "
-            "`SHAREPOINT_CLIENT_SECRET` và `GEMINI_API_KEY` trong Environment."
-        )
-        return
-
-    st.info(
-        "Lần đầu tạo Vector DB có thể mất nhiều phút vì app phải tải tài liệu "
-        "SharePoint rồi tạo embeddings bằng Gemini. Nếu chạy trên Render Free, "
-        "hãy giữ tab này mở cho đến khi hoàn tất."
-    )
-
-    has_downloaded_docs = DATA_DIR.exists() and any(DATA_DIR.iterdir())
-
-    if has_downloaded_docs and st.button(
-        "Tạo Vector DB từ tài liệu đã tải",
-        key=f"index_downloaded_{location}",
-    ):
-        with st.spinner("Đang tạo Vector DB từ tài liệu đã tải..."):
-            from sync_documents import sync_documents
-
-            try:
-                sync_documents(force_index=True, skip_download=True)
-            except Exception as exc:
-                st.error(f"Chưa tạo được Vector DB: {exc}")
-            else:
-                st.success("Đã tạo xong Vector DB. Trang sẽ tải lại.")
-                st.rerun()
-
-    if st.button("Tạo Vector DB từ SharePoint", key=f"sync_missing_{location}"):
-        with st.spinner("Đang tải tài liệu SharePoint và tạo Vector DB..."):
-            from sync_documents import sync_documents
-
-            try:
-                sync_documents(force_index=True)
-            except Exception as exc:
-                st.error(f"Chưa tạo được Vector DB: {exc}")
-            else:
-                st.success("Đã tạo xong Vector DB. Trang sẽ tải lại.")
-                st.rerun()
-
-    if st.button("Chỉ tải tài liệu từ SharePoint", key=f"download_missing_{location}"):
-        with st.spinner("Đang tải tài liệu SharePoint, chưa tạo Vector DB..."):
-            from sync_documents import sync_documents
-
-            try:
-                sync_documents(skip_index=True)
-            except Exception as exc:
-                st.error(f"Chưa tải được tài liệu: {exc}")
-            else:
-                st.success(
-                    "Đã tải tài liệu xong. Bạn có thể bấm "
-                    "'Tạo Vector DB từ tài liệu đã tải'."
-                )
-                st.rerun()
-
-
 def _maybe_auto_sync() -> None:
     if os.getenv("AUTO_SYNC_ON_START", "false").lower() not in {"1", "true", "yes"}:
         return
@@ -290,15 +221,14 @@ Bạn có thể hỏi các thông tin liên quan đến chính sách, quy địn
 if not CHROMA_DB_DIR.exists():
     if DATA_DIR.exists() and any(DATA_DIR.iterdir()):
         st.warning(
-            "Đã có tài liệu SharePoint trên Render nhưng chưa có Vector DB. "
-            "Hãy bấm `Tạo Vector DB từ tài liệu đã tải` để hoàn tất bước lập chỉ mục."
+            "Đã có tài liệu SharePoint nhưng chưa có Vector DB. "
+            "Vui lòng liên hệ quản trị viên để hoàn tất bước lập chỉ mục."
         )
     else:
         st.error(
             "🚨 Cảnh báo: Chưa tìm thấy dữ liệu Vector DB. "
-            "Vui lòng dùng các nút bên dưới để tải tài liệu SharePoint và tạo Vector DB."
+            "Vui lòng liên hệ quản trị viên để cấu hình dữ liệu."
         )
-    _render_missing_data_actions("no_chroma")
     st.stop()
 
 if not DATA_DIR.exists():
@@ -316,13 +246,7 @@ if not document_files:
     )
     st.stop()
 
-st.success(f"✅ Đã tìm thấy {len(document_files)} file tài liệu trong thư mục nguồn.")
 index_is_current = _index_matches_sources()
-if not index_is_current:
-    st.warning(
-        "Tài liệu nguồn đã được cập nhật nhưng Vector DB chưa khớp hoàn toàn. "
-        "Bạn vẫn có thể tải file biểu mẫu; để câu trả lời dùng đủ nội dung mới, hãy rebuild index khi quota Gemini sẵn sàng."
-    )
 
 if "messages" not in st.session_state:
     st.session_state["messages"] = []
@@ -353,33 +277,7 @@ with st.sidebar:
     if LOGO_PATH.exists():
         st.image(str(LOGO_PATH), width=180)
 
-    st.header("Cài đặt")
-    if st.button("Cập nhật tài liệu từ SharePoint"):
-        with st.spinner("Đang tải tài liệu mới và cập nhật Vector DB..."):
-            from sync_documents import sync_documents
-
-            try:
-                sync_documents()
-            except Exception as exc:
-                st.error(f"Chưa cập nhật được Vector DB: {exc}")
-            else:
-                st.success("Đã cập nhật xong. Trang sẽ tải lại.")
-                st.rerun()
-
-    _render_missing_data_actions("sidebar")
-
-    if st.button("Chỉ tải tài liệu từ SharePoint"):
-        with st.spinner("Đang tải tài liệu mới, bỏ qua rebuild Vector DB..."):
-            from sync_documents import sync_documents
-
-            try:
-                sync_documents(skip_index=True)
-            except Exception as exc:
-                st.error(f"Chưa tải được tài liệu: {exc}")
-            else:
-                st.success("Đã tải tài liệu xong. Trang sẽ tải lại.")
-                st.rerun()
-
+    st.header("Chat")
     if st.button("Xóa lịch sử Chat"):
         st.session_state["messages"] = []
         st.rerun()
@@ -387,12 +285,7 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### Trạng thái dữ liệu")
     st.markdown(f"- Số file tài liệu: `{len(document_files)}`")
-    st.markdown(f"- Vector DB khớp nguồn: `{'Có' if index_is_current else 'Chưa'}`")
+    index_status = "Có" if index_is_current else "Chưa"
+    st.markdown(f"- Vector DB khớp nguồn: `{index_status}`")
     if MANIFEST_PATH.exists():
         st.markdown("- Nguồn: `SharePoint manifest đã sẵn sàng`")
-
-    st.markdown("---")
-    st.markdown("### Hướng dẫn vận hành")
-    st.markdown("1. Chạy `python sync_documents.py` để tải file mới và tự rebuild index khi có thay đổi.")
-    st.markdown("2. Có thể bật `AUTO_SYNC_ON_START=true` để app tự kiểm tra SharePoint khi khởi động.")
-    st.markdown("3. Refresh trang sau khi cập nhật nếu người dùng đang mở sẵn giao diện.")

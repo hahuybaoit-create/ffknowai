@@ -1,3 +1,4 @@
+import gc
 import os
 import shutil
 import sys
@@ -174,10 +175,20 @@ def build_index() -> None:
             time.sleep(batch_sleep)
 
     vector_store.persist()
+    del vector_store
+    gc.collect()
+    time.sleep(2)
     if CHROMA_DB_DIR.exists():
         print("Dang thay the Vector DB cu bang ban moi...")
         shutil.rmtree(CHROMA_DB_DIR, ignore_errors=True)
-    shutil.move(str(CHROMA_DB_TMP_DIR), str(CHROMA_DB_DIR))
+    try:
+        shutil.move(str(CHROMA_DB_TMP_DIR), str(CHROMA_DB_DIR))
+    except PermissionError:
+        if (CHROMA_DB_DIR / "chroma.sqlite3").exists():
+            print("Vector DB da duoc chep xong; bo qua loi khoa file tam tren Windows.")
+            shutil.rmtree(CHROMA_DB_TMP_DIR, ignore_errors=True)
+        else:
+            raise
     print(f"Hoan tat. Vector DB da duoc rebuild tai '{CHROMA_DB_DIR}'.")
 
 
