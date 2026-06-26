@@ -11,6 +11,16 @@ LOGGER = logging.getLogger(__name__)
 app = FastAPI(title="FF Know AI - Zalo OA Webhook")
 
 
+@app.get("/")
+def root() -> dict[str, str]:
+    return {
+        "service": "FF Know AI - Zalo OA Webhook",
+        "status": "ok",
+        "health_check": "/healthz",
+        "webhook": "/zalo/webhook",
+    }
+
+
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
