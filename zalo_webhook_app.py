@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
@@ -12,6 +13,52 @@ logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger(__name__)
 
 app = FastAPI(title="FF Know AI - Zalo OA Webhook")
+SYNC_STATUS: dict[str, Any] = {
+    "state": "idle",
+    "started_at": None,
+    "finished_at": None,
+    "error": None,
+}
+
+
+def _admin_secret_ok(secret: str | None) -> bool:
+    expected_secret = os.getenv("ADMIN_SYNC_SECRET") or os.getenv("ZALO_WEBHOOK_SECRET")
+    if not expected_secret:
+        return False
+    return bool(secret) and secret == expected_secret
+
+
+def _sync_documents_background(force_index: bool = True, skip_download: bool = False) -> None:
+    SYNC_STATUS.update(
+        {
+            "state": "running",
+            "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "finished_at": None,
+            "error": None,
+        }
+    )
+    try:
+        from sync_documents import sync_documents
+
+        sync_documents(force_index=force_index, skip_download=skip_download)
+    except Exception as exc:
+        LOGGER.exception("Admin sync failed")
+        SYNC_STATUS.update(
+            {
+                "state": "failed",
+                "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "error": str(exc),
+            }
+        )
+        return
+
+    SYNC_STATUS.update(
+        {
+            "state": "done",
+            "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "error": None,
+        }
+    )
 
 
 def _answer_message_background(message: Any) -> None:
@@ -70,6 +117,39 @@ def debugz(
         else [],
         "zalo_token_set": bool(os.getenv("ZALO_OA_ACCESS_TOKEN")),
         "gemini_key_set": bool(os.getenv("GEMINI_API_KEY")),
+    }
+
+
+@app.get("/admin/sync")
+def admin_sync(
+    background_tasks: BackgroundTasks,
+    secret: str | None = Query(default=None),
+    skip_download: bool = Query(default=False),
+) -> dict[str, Any]:
+    if not _admin_secret_ok(secret):
+        raise HTTPException(status_code=401, detail="Invalid admin secret")
+    if SYNC_STATUS.get("state") == "running":
+        return {"status": "already_running", "sync": SYNC_STATUS}
+
+    background_tasks.add_task(
+        _sync_documents_background,
+        True,
+        skip_download,
+    )
+    return {"status": "accepted", "sync": SYNC_STATUS}
+
+
+@app.get("/admin/sync/status")
+def admin_sync_status(
+    secret: str | None = Query(default=None),
+) -> dict[str, Any]:
+    if not _admin_secret_ok(secret):
+        raise HTTPException(status_code=401, detail="Invalid admin secret")
+    return {
+        "status": "ok",
+        "sync": SYNC_STATUS,
+        "data_dir_exists": DATA_DIR.exists(),
+        "chroma_db_exists": CHROMA_DB_DIR.exists(),
     }
 
 
