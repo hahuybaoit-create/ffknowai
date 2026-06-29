@@ -181,11 +181,17 @@ def admin_sync_status(
 ) -> dict[str, Any]:
     if not _admin_secret_ok(secret):
         raise HTTPException(status_code=401, detail="Invalid admin secret")
+    data_ready = DATA_DIR.exists() and CHROMA_DB_DIR.exists()
     return {
         "status": "ok",
         "sync": SYNC_STATUS,
         "data_dir_exists": DATA_DIR.exists(),
         "chroma_db_exists": CHROMA_DB_DIR.exists(),
+        "data_dir": str(DATA_DIR),
+        "chroma_db_dir": str(CHROMA_DB_DIR),
+        "next_action": None
+        if data_ready or SYNC_STATUS.get("state") == "running"
+        else "Open /admin/sync?secret=<ADMIN_SYNC_SECRET> to start SharePoint sync and build Vector DB.",
     }
 
 

@@ -112,3 +112,26 @@ FF_APP_DATA_ROOT=/var/data/ff-know-ai
 ```
 
 Webhook service can truy cap cung thu muc `chroma_db` voi app chat. Neu deploy thanh service rieng, hay gan cung persistent disk hoac copy Vector DB sang service webhook.
+
+## Tao du lieu Vector DB tren Render
+
+Sau khi deploy webhook service va cau hinh Environment, URL status chi de kiem
+tra trang thai:
+
+```text
+https://<domain-cua-ban>/admin/sync/status?secret=<ADMIN_SYNC_SECRET>
+```
+
+Neu JSON tra ve `state: "idle"`, `data_dir_exists: false` va
+`chroma_db_exists: false`, nghia la chua co job sync nao chay. Mo URL nay de
+bat dau tai SharePoint va build Vector DB:
+
+```text
+https://<domain-cua-ban>/admin/sync?secret=<ADMIN_SYNC_SECRET>
+```
+
+Sau do quay lai URL `/admin/sync/status?...` de theo doi. Khi sync thanh cong,
+`sync.state` se la `done`, `data_dir_exists` va `chroma_db_exists` se la `true`.
+
+Neu secret da tung bi chup man hinh hoac chia se, hay doi lai
+`ADMIN_SYNC_SECRET`/`ZALO_WEBHOOK_SECRET` trong Render Environment roi redeploy.
