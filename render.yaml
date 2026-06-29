@@ -9,7 +9,7 @@ services:
     disk:
       name: ff-know-ai-data
       mountPath: /var/data
-      sizeGB: 1
+      sizeGB: 5
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9

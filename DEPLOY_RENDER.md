@@ -25,7 +25,13 @@ The service uses:
 - Region: Singapore
 - Build command: `pip install -r requirements.txt`
 - Start command: `python render_start.py`
-- Persistent disk: `/var/data`
+- Persistent disk mount path: `/var/data`
+- Persistent disk size: `5 GB`
+
+When adding the Render disk manually, enter `/var/data` in **Mount Path**. The
+app stores its runtime data under `FF_APP_DATA_ROOT=/var/data/ff-know-ai`, so
+`data_documents`, `chroma_db`, and `chroma_db_tmp` will live on the persistent
+disk.
 
 Persistent disks require a paid Render web service. If the service is still on
 the Free plan, Vector DB files created at runtime can disappear after a restart

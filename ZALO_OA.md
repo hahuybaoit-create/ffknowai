@@ -111,7 +111,17 @@ ZALO_WEBHOOK_SECRET=...
 FF_APP_DATA_ROOT=/var/data/ff-know-ai
 ```
 
-Webhook service can truy cap cung thu muc `chroma_db` voi app chat. Neu deploy thanh service rieng, hay gan cung persistent disk hoac copy Vector DB sang service webhook.
+Neu them Disk tren Render, nhap **Mount Path** la:
+
+```text
+/var/data
+```
+
+Code hien tai dung `FF_APP_DATA_ROOT=/var/data/ff-know-ai`, nen cac thu muc
+`data_documents`, `chroma_db`, va `chroma_db_tmp` se nam ben trong disk do.
+Webhook service can truy cap cung thu muc `chroma_db` voi app chat. Neu deploy
+thanh service rieng, hay gan cung persistent disk hoac copy Vector DB sang
+service webhook.
 
 ## Tao du lieu Vector DB tren Render
 
