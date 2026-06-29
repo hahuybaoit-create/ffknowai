@@ -10,6 +10,10 @@ ZALO_WEBHOOK_SECRET="chuoi-bi-mat-tu-dat"
 ZALO_ALLOWED_EVENTS="user_send_text"
 ZALO_MAX_REPLY_CHARS=1800
 ZALO_VERIFY_META_CONTENT="noi-dung-content-zalo-cap"
+ZALO_ALLOWED_USER_IDS="user_id_1,user_id_2"
+FILE_DOWNLOAD_SECRET="chuoi-bi-mat-de-tai-file"
+PUBLIC_BASE_URL="https://ffknowai-1.onrender.com"
+APP_ACCESS_PASSWORD="mat-khau-vao-giao-dien-web"
 ```
 
 `ZALO_WEBHOOK_SECRET` la chuoi bi mat tu dat. Khi cau hinh webhook tren Zalo OA, them secret vao query string de chan request khong mong muon.
@@ -33,6 +37,10 @@ Webhook URL:
 ```text
 https://<domain-cua-ban>/zalo/webhook?secret=<ZALO_WEBHOOK_SECRET>
 ```
+
+Neu muon chi cho mot so nguoi dung Zalo duoc hoi chatbot, them cac `user_id` vao `ZALO_ALLOWED_USER_IDS`, cach nhau bang dau phay. De trong bien nay thi moi nguoi nhan OA deu co the hoi.
+
+Chatbot se gui kem muc `File lien quan`. Tren Zalo, neu co `PUBLIC_BASE_URL` va `FILE_DOWNLOAD_SECRET`, moi file se co link tai xuong dang `/files/...`.
 
 ## Xac thuc domain Zalo
 

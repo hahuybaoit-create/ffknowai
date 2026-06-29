@@ -4,9 +4,10 @@ import time
 from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 from zalo_oa import answer_zalo_message, parse_incoming_message, verify_webhook_secret
+from document_files import DOWNLOAD_MIME_TYPES, resolve_file_key
 from paths import CHROMA_DB_DIR, DATA_DIR
 
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +24,17 @@ SYNC_STATUS: dict[str, Any] = {
 
 def _admin_secret_ok(secret: str | None) -> bool:
     expected_secret = os.getenv("ADMIN_SYNC_SECRET") or os.getenv("ZALO_WEBHOOK_SECRET")
+    if not expected_secret:
+        return False
+    return bool(secret) and secret == expected_secret
+
+
+def _file_download_secret_ok(secret: str | None) -> bool:
+    expected_secret = (
+        os.getenv("FILE_DOWNLOAD_SECRET")
+        or os.getenv("ADMIN_SYNC_SECRET")
+        or os.getenv("ZALO_WEBHOOK_SECRET")
+    )
     if not expected_secret:
         return False
     return bool(secret) and secret == expected_secret
@@ -120,6 +132,30 @@ def debugz(
     }
 
 
+@app.get("/files/{file_key}")
+def download_file(
+    file_key: str,
+    secret: str | None = Query(default=None),
+) -> FileResponse:
+    if not _file_download_secret_ok(secret):
+        raise HTTPException(status_code=401, detail="Invalid file secret")
+    try:
+        file_path = resolve_file_key(file_key)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="File not found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return FileResponse(
+        path=file_path,
+        filename=file_path.name,
+        media_type=DOWNLOAD_MIME_TYPES.get(
+            file_path.suffix.lower(),
+            "application/octet-stream",
+        ),
+    )
+
+
 @app.get("/admin/sync")
 def admin_sync(
     background_tasks: BackgroundTasks,
@@ -211,6 +247,8 @@ async def zalo_webhook(
     if message is None:
         LOGGER.info("Ignored unsupported Zalo OA webhook payload: %s", payload)
         return {"status": "ignored"}
+
+    os.environ.setdefault("PUBLIC_BASE_URL", str(request.base_url).rstrip("/"))
 
     LOGGER.info(
         "Accepted Zalo OA webhook event_name=%s user_id=%s text_len=%s",

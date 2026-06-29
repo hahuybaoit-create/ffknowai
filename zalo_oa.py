@@ -6,7 +6,7 @@ from typing import Any
 import requests
 from dotenv import load_dotenv
 
-from agent import ask_agent
+from agent import answer_query
 
 load_dotenv()
 
@@ -37,6 +37,27 @@ def _max_reply_chars() -> int:
         return max(200, int(_env("ZALO_MAX_REPLY_CHARS", "1800")))
     except ValueError:
         return 1800
+
+
+def _allowed_user_ids() -> set[str]:
+    return {
+        user_id.strip()
+        for user_id in _env("ZALO_ALLOWED_USER_IDS").split(",")
+        if user_id.strip()
+    }
+
+
+def is_user_allowed(user_id: str) -> bool:
+    allowed_user_ids = _allowed_user_ids()
+    return not allowed_user_ids or user_id in allowed_user_ids
+
+
+def _unauthorized_reply() -> str:
+    return _env(
+        "ZALO_UNAUTHORIZED_REPLY",
+        "Tài khoản Zalo này chưa được cấp quyền sử dụng Flexfit - Know AI. "
+        "Vui lòng liên hệ quản trị viên để được hỗ trợ.",
+    )
 
 
 def verify_webhook_secret(received_secret: str | None) -> bool:
@@ -147,7 +168,14 @@ def send_text_message(user_id: str, text: str) -> None:
 
 def answer_zalo_message(message: ZaloIncomingMessage) -> str:
     LOGGER.info("Answering Zalo OA message from user_id=%s", message.user_id)
-    answer = ask_agent(message.text)
+    if not is_user_allowed(message.user_id):
+        LOGGER.warning("Rejected unauthorized Zalo user_id=%s", message.user_id)
+        answer = _unauthorized_reply()
+        send_text_message(message.user_id, answer)
+        return answer
+
+    answer_result = answer_query(message.text, include_file_links=True)
+    answer = answer_result.text
     LOGGER.info(
         "AI answer generated for Zalo user_id=%s answer_len=%s",
         message.user_id,

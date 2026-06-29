@@ -6,7 +6,8 @@ from pathlib import Path
 
 import streamlit as st
 
-from agent import ask_agent
+from agent import answer_query
+from document_files import file_references_to_downloads
 from paths import CHROMA_DB_DIR, DATA_DIR
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -199,6 +200,24 @@ def _maybe_auto_sync() -> None:
 
 st.set_page_config(page_title="FF - Know AI", page_icon="🤖", layout="wide")
 
+
+def _require_app_password() -> None:
+    expected_password = os.getenv("APP_ACCESS_PASSWORD", "").strip().strip('"').strip("'")
+    if not expected_password or st.session_state.get("app_access_granted"):
+        return
+
+    st.title("FF - Know AI")
+    password = st.text_input("Nhập mật khẩu truy cập", type="password")
+    if st.button("Đăng nhập"):
+        if password == expected_password:
+            st.session_state["app_access_granted"] = True
+            st.rerun()
+        st.error("Mật khẩu không đúng hoặc tài khoản chưa được cấp quyền.")
+    st.stop()
+
+
+_require_app_password()
+
 _maybe_auto_sync()
 
 if LOGO_PATH.exists():
@@ -264,9 +283,10 @@ if prompt := st.chat_input("Hãy nhập câu hỏi của bạn, ví dụ: Quy đ
 
     with st.chat_message("assistant"):
         with st.spinner("Đang tra cứu tài liệu..."):
-            response = ask_agent(prompt)
+            answer_result = answer_query(prompt)
+            response = answer_result.text
             st.markdown(response)
-            downloads = _download_matches(prompt)
+            downloads = file_references_to_downloads(answer_result.files) or _download_matches(prompt)
             _render_downloads(downloads, f"current_{len(st.session_state['messages'])}")
 
     st.session_state["messages"].append(

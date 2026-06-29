@@ -1,6 +1,7 @@
 import os
 import re
 import unicodedata
+from dataclasses import dataclass
 from typing import Iterable
 
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
@@ -11,12 +12,19 @@ from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from document_files import FileReference, find_related_files, format_file_references
 from paths import CHROMA_DB_DIR
 
 load_dotenv()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CHROMA_DB_DIR = str(CHROMA_DB_DIR)
+
+
+@dataclass
+class AgentAnswer:
+    text: str
+    files: list[FileReference]
 
 ANSWER_PROMPT = ChatPromptTemplate.from_messages(
     [
@@ -371,12 +379,17 @@ def get_relevant_documents(query: str) -> list[Document]:
     return _merge_documents(priority_docs, expanded_docs, keyword_docs, vector_docs)[:32]
 
 
-def ask_agent(query: str) -> str:
+def answer_query(query: str, include_file_links: bool = False) -> AgentAnswer:
     try:
         docs = get_relevant_documents(query)
         context = _format_context(docs)
+        files = find_related_files(query, docs[:8])
 
         if not context:
+            text = "Tôi chưa tìm thấy thông tin này trong bộ tài liệu đã cung cấp."
+            if files:
+                text += "\n\nFile liên quan:\n" + format_file_references(files, include_file_links)
+            return AgentAnswer(text=text, files=files)
             return "Tôi chưa tìm thấy thông tin này trong bộ tài liệu đã cung cấp."
 
         llm = ChatGoogleGenerativeAI(
@@ -391,6 +404,15 @@ def ask_agent(query: str) -> str:
         if sources:
             answer += "\n\nNguồn đã tra cứu:\n" + "\n".join(f"- {source}" for source in sources)
 
+        if files:
+            answer += "\n\nFile liên quan:\n" + format_file_references(files, include_file_links)
+
+        return AgentAnswer(text=answer, files=files)
         return answer
     except Exception as e:
+        return AgentAnswer(text=f"Lỗi trong quá trình xử lý: {e}", files=[])
         return f"Lỗi trong quá trình xử lý: {e}"
+
+
+def ask_agent(query: str) -> str:
+    return answer_query(query).text
