@@ -2,11 +2,13 @@ import os
 import re
 import unicodedata
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable
 
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 
 from dotenv import load_dotenv
+from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader, TextLoader
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
@@ -14,14 +16,16 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from document_files import (
     FileReference,
+    build_document_reference_answer,
     build_document_shortcut_answer,
     build_form_set_answer,
     build_single_form_answer,
+    document_files,
     find_related_files,
     format_file_references,
     manifest_item_for_path,
 )
-from paths import CHROMA_DB_DIR
+from paths import CHROMA_DB_DIR, DATA_DIR
 
 load_dotenv()
 
@@ -163,6 +167,8 @@ def _query_terms(query: str) -> list[str]:
 
 def _intent(query: str) -> str:
     normalized = _normalize_text(query)
+    if any(term in normalized for term in ("tai lieu tham khao", "link tai lieu", "duong dan", "nguon tai lieu")):
+        return "document_reference"
     if any(
         term in normalized
         for term in (
@@ -184,6 +190,59 @@ def _intent(query: str) -> str:
     if any(term in normalized for term in ("quy dinh", "chinh sach", "quy che", "noi quy", "che do")):
         return "policy"
     return "general"
+
+
+def _preferred_source_terms(query: str) -> list[tuple[str, ...]]:
+    normalized = _normalize_text(query)
+    if "hoa hong" in normalized and "ctv" in normalized:
+        return [("hoa", "hong", "ctv")]
+    if "co che" in normalized and "luong" in normalized:
+        return [("co", "che", "tinh", "luong", "bu")]
+    return []
+
+
+def _load_local_file_documents(file_path: Path) -> list[Document]:
+    suffix = file_path.suffix.lower()
+    if suffix == ".pdf":
+        docs = PyPDFLoader(str(file_path)).load()
+    elif suffix == ".docx":
+        docs = Docx2txtLoader(str(file_path)).load()
+    elif suffix == ".txt":
+        docs = TextLoader(str(file_path), encoding="utf-8").load()
+    else:
+        return []
+
+    relative_path = str(file_path.relative_to(DATA_DIR)).replace("\\", "/")
+    manifest_item = manifest_item_for_path(relative_path)
+    for doc in docs:
+        doc.metadata["source"] = str(file_path)
+        doc.metadata["file_name"] = file_path.name
+        doc.metadata["relative_path"] = relative_path
+        doc.metadata["source_type"] = "sharepoint" if manifest_item else "local"
+        if manifest_item.get("web_url"):
+            doc.metadata["web_url"] = manifest_item["web_url"]
+        if manifest_item.get("last_modified"):
+            doc.metadata["last_modified"] = manifest_item["last_modified"]
+        if manifest_item.get("relative_path"):
+            doc.metadata["sharepoint_relative_path"] = manifest_item["relative_path"]
+    return docs
+
+
+def get_preferred_source_documents(query: str) -> list[Document]:
+    preferred_groups = _preferred_source_terms(query)
+    if not preferred_groups:
+        return []
+
+    docs: list[Document] = []
+    for source_terms in preferred_groups:
+        for file_path in document_files():
+            relative_path = str(file_path.relative_to(DATA_DIR)).replace("\\", "/")
+            normalized_path = _normalize_text(relative_path)
+            if not all(term in normalized_path for term in source_terms):
+                continue
+            docs.extend(_load_local_file_documents(file_path))
+
+    return _rank_and_filter_documents(docs, query)[:24]
 
 
 def _has_clear_topic(query: str) -> bool:
@@ -428,6 +487,32 @@ def get_documents_by_source_pages(
     return [doc for _, _, _, doc in ranked]
 
 
+def get_documents_by_source_terms(
+    vector_store: Chroma,
+    source_terms: Iterable[str],
+) -> list[Document]:
+    normalized_source_terms = [_normalize_text(term) for term in source_terms]
+    ranked: list[tuple[str, int, int, Document]] = []
+    for index, _, metadata, doc in _collection_documents(vector_store):
+        source_text = " ".join(
+            str(value)
+            for value in (
+                metadata.get("file_name"),
+                metadata.get("relative_path"),
+                metadata.get("sharepoint_relative_path"),
+                metadata.get("source"),
+            )
+            if value
+        )
+        normalized_source = _normalize_text(source_text)
+        if not all(term in normalized_source for term in normalized_source_terms):
+            continue
+        ranked.append((_document_date(doc), _page_number(metadata) or 0, index, doc))
+
+    ranked.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+    return [doc for _, _, _, doc in ranked]
+
+
 def get_neighbor_documents(
     vector_store: Chroma,
     seed_docs: Iterable[Document],
@@ -545,6 +630,10 @@ def _merge_documents(*document_groups: Iterable[Document]) -> list[Document]:
 
 
 def get_relevant_documents(query: str) -> list[Document]:
+    preferred_local_docs = get_preferred_source_documents(query)
+    if preferred_local_docs:
+        return preferred_local_docs
+
     vector_store = get_vector_store()
     retriever = vector_store.as_retriever(
         search_kwargs={
@@ -556,6 +645,9 @@ def get_relevant_documents(query: str) -> list[Document]:
         priority_docs = get_tam_phap_action_documents(vector_store)
     elif _is_tam_phap_bi_kip_query(query):
         priority_docs = get_tam_phap_management_documents(vector_store)
+    else:
+        for source_terms in _preferred_source_terms(query):
+            priority_docs.extend(get_documents_by_source_terms(vector_store, source_terms))
 
     if priority_docs:
         return _rank_and_filter_documents(priority_docs, query)[:24] or priority_docs[:24]
@@ -586,6 +678,11 @@ def answer_query(
         form_set_answer = build_form_set_answer(effective_query, include_file_links)
         if form_set_answer:
             text, files = form_set_answer
+            return AgentAnswer(text=text, files=files)
+
+        document_reference_answer = build_document_reference_answer(effective_query, include_file_links)
+        if document_reference_answer:
+            text, files = document_reference_answer
             return AgentAnswer(text=text, files=files)
 
         document_shortcut_answer = build_document_shortcut_answer(effective_query, include_file_links)

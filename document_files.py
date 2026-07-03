@@ -29,6 +29,11 @@ DOWNLOAD_QUERY_TERMS = {
     "mau",
     "form",
     "tai",
+    "tai lieu",
+    "tai lieu tham khao",
+    "tham khao",
+    "link",
+    "duong dan",
     "download",
     "file",
     "don",
@@ -107,6 +112,18 @@ SINGLE_FORM_DEFINITIONS = {
 }
 
 DOCUMENT_SHORTCUT_DEFINITIONS = {
+    "hoa_hong_ctv": {
+        "triggers": (
+            "hoa hong ctv",
+            "chinh sach hoa hong ctv",
+            "tai lieu tham khao chinh sach hoa hong ctv",
+            "tai lieu chinh sach hoa hong ctv",
+        ),
+        "patterns": ("chinh sach hoa hong ctv",),
+        "intro": "Tài liệu tham khảo chính sách hoa hồng CTV là:",
+        "label": "Chính sách hoa hồng CTV",
+        "direct_answer": False,
+    },
     "co_che_luong_bu": {
         "triggers": (
             "co che luong",
@@ -118,6 +135,7 @@ DOCUMENT_SHORTCUT_DEFINITIONS = {
         "patterns": ("co che tinh luong bu",),
         "intro": "Thông tin cơ chế lương BU cần được tra cứu theo tài liệu hiện hành sau:",
         "label": "Cơ chế tính lương BU",
+        "direct_answer": True,
     },
 }
 
@@ -386,12 +404,15 @@ def build_single_form_answer(
 def build_document_shortcut_answer(
     query: str,
     include_links: bool = True,
+    direct_only: bool = True,
 ) -> tuple[str, list[FileReference]] | None:
     key = _definition_key(query, DOCUMENT_SHORTCUT_DEFINITIONS)
     if not key:
         return None
 
     definition = DOCUMENT_SHORTCUT_DEFINITIONS[key]
+    if direct_only and not definition.get("direct_answer", False):
+        return None
     file = _file_reference_for_patterns(definition["patterns"])
     if not file:
         return None
@@ -407,6 +428,128 @@ def build_document_shortcut_answer(
         ]
     )
     return text, [file]
+
+
+def _is_document_reference_query(query: str) -> bool:
+    normalized_query = _normalize_text(query)
+    return any(
+        term in normalized_query
+        for term in (
+            "tai lieu tham khao",
+            "tai lieu",
+            "link",
+            "duong dan",
+            "file",
+            "nguon",
+            "source",
+        )
+    )
+
+
+def find_document_references(query: str, limit: int = 3) -> list[FileReference]:
+    if not _is_document_reference_query(query):
+        return []
+
+    files = document_files()
+    if not files:
+        return []
+
+    normalized_query = _normalize_text(query)
+    generic_terms = {
+        "anh",
+        "ban",
+        "cho",
+        "toi",
+        "xin",
+        "gui",
+        "giup",
+        "tai",
+        "lieu",
+        "tham",
+        "khao",
+        "link",
+        "duong",
+        "dan",
+        "file",
+        "nguon",
+        "chinh",
+        "sach",
+        "quy",
+        "dinh",
+        "ve",
+        "cua",
+    }
+    terms = [term for term in _query_terms(query) if term not in generic_terms]
+    phrase_boosts = (
+        "hoa hong ctv",
+        "chinh sach hoa hong ctv",
+        "co che tinh luong bu",
+        "co che luong bu",
+        "tam ung thanh toan",
+        "cong tac",
+        "nghi viec",
+    )
+    relevant_phrases = [phrase for phrase in phrase_boosts if phrase in normalized_query]
+
+    ranked: list[tuple[int, str, str, Path]] = []
+    manifest_items = _manifest_by_relative_path()
+    for path in files:
+        relative_path = _normalize_relative_path(str(path.relative_to(DATA_DIR)))
+        normalized_path = _normalize_text(relative_path)
+        manifest_item = manifest_items.get(relative_path) or {}
+        score = sum(3 for term in terms if term in normalized_path)
+        score += sum(15 for phrase in relevant_phrases if phrase in normalized_path)
+
+        if "ctv" in normalized_query and "hoa hong" in normalized_query:
+            if "hoa hong ctv" not in normalized_path:
+                continue
+            score += 30
+
+        if score <= 0:
+            continue
+        ranked.append((score, manifest_item.get("last_modified", ""), relative_path.lower(), path))
+
+    if not ranked:
+        return []
+
+    ranked.sort(key=lambda item: item[2])
+    ranked.sort(key=lambda item: item[1], reverse=True)
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    top_score = ranked[0][0]
+    references: list[FileReference] = []
+    seen: set[str] = set()
+    for score, _, _, path in ranked:
+        if score < max(1, top_score - 10):
+            continue
+        relative_path = _normalize_relative_path(str(path.relative_to(DATA_DIR)))
+        if relative_path in seen:
+            continue
+        seen.add(relative_path)
+        references.append(_to_file_reference(path, manifest_items))
+        if len(references) >= limit:
+            break
+    return references
+
+
+def build_document_reference_answer(
+    query: str,
+    include_links: bool = True,
+) -> tuple[str, list[FileReference]] | None:
+    if not _is_document_reference_query(query):
+        return None
+
+    document_shortcut = build_document_shortcut_answer(query, include_links, direct_only=False)
+    if document_shortcut:
+        return document_shortcut
+
+    references = find_document_references(query)
+    if not references:
+        return None
+
+    lines = ["Bạn có thể tham khảo tài liệu tại đường dẫn sau:"]
+    for file in references:
+        lines.append(f"- {file.name}: {_plain_file_url(file, include_links)}")
+    return "\n".join(lines), references
 
 
 def find_form_set_files(query: str) -> list[tuple[str, FileReference]]:
