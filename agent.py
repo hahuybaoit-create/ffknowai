@@ -12,7 +12,13 @@ from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from document_files import FileReference, find_related_files, format_file_references, manifest_item_for_path
+from document_files import (
+    FileReference,
+    build_form_set_answer,
+    find_related_files,
+    format_file_references,
+    manifest_item_for_path,
+)
 from paths import CHROMA_DB_DIR
 
 load_dotenv()
@@ -53,7 +59,7 @@ Luật bắt buộc:
 - Trả lời tiếng Việt, ngắn gọn, bám sát nguyên văn tài liệu. Cấu trúc mặc định:
   1) Câu trả lời chính.
   2) Chi tiết cần biết, nếu có.
-  3) Tài liệu/biểu mẫu SharePoint liên quan, nếu có.
+  3) Link mẫu/tài liệu theo câu: "Bạn có thể tham khảo mẫu ... tại [đây]".
 """,
         ),
         (
@@ -155,13 +161,79 @@ def _query_terms(query: str) -> list[str]:
 
 def _intent(query: str) -> str:
     normalized = _normalize_text(query)
-    if any(term in normalized for term in ("bieu mau", "mau don", "template", "form", "phieu", "don xin", "tai file", "download")):
+    if any(
+        term in normalized
+        for term in (
+            "bieu mau",
+            "mau don",
+            "template",
+            "form",
+            "phieu",
+            "don xin",
+            "tai file",
+            "download",
+            "bo nghi viec",
+            "mau cong tac",
+        )
+    ):
         return "form"
     if any(term in normalized for term in ("quy trinh", "huong dan", "cac buoc", "thao tac", "lam the nao", "nhu the nao")):
         return "process"
     if any(term in normalized for term in ("quy dinh", "chinh sach", "quy che", "noi quy", "che do")):
         return "policy"
     return "general"
+
+
+def _has_clear_topic(query: str) -> bool:
+    normalized = _normalize_text(query)
+    topic_terms = (
+        "cong tac",
+        "nghi viec",
+        "thanh toan",
+        "tam ung",
+        "nghi phep",
+        "luong",
+        "thuong",
+        "kpi",
+        "dong phuc",
+        "bao ho",
+        "thu viec",
+        "tuyen dung",
+        "nhan su",
+        "quy trinh",
+        "quy dinh",
+        "chinh sach",
+        "bieu mau",
+        "template",
+        "form",
+    )
+    return any(term in normalized for term in topic_terms)
+
+
+def _resolve_followup_query(query: str, conversation_context: str | None = None) -> str:
+    if not conversation_context or _has_clear_topic(query):
+        return query
+
+    normalized = _normalize_text(query)
+    followup_terms = (
+        "mau",
+        "bieu mau",
+        "link",
+        "tai",
+        "download",
+        "quy trinh",
+        "huong dan",
+        "cai nay",
+        "cai do",
+        "bo nay",
+        "nhung gi",
+        "gom",
+        "them",
+    )
+    is_short = len(normalized.split()) <= 8
+    if is_short or any(term in normalized for term in followup_terms):
+        return f"{conversation_context}\nCâu hỏi tiếp theo: {query}"
+    return query
 
 
 def _metadata_text(doc: Document) -> str:
@@ -497,29 +569,39 @@ def get_relevant_documents(query: str) -> list[Document]:
     return _rank_and_filter_documents(docs, query)[:32]
 
 
-def answer_query(query: str, include_file_links: bool = True) -> AgentAnswer:
+def answer_query(
+    query: str,
+    include_file_links: bool = True,
+    conversation_context: str | None = None,
+) -> AgentAnswer:
     try:
-        intent = _intent(query)
+        effective_query = _resolve_followup_query(query, conversation_context)
+        form_set_answer = build_form_set_answer(effective_query, include_file_links)
+        if form_set_answer:
+            text, files = form_set_answer
+            return AgentAnswer(text=text, files=files)
+
+        intent = _intent(effective_query)
         if intent == "form":
-            form_files = find_related_files(query, None, limit=5)
+            form_files = find_related_files(effective_query, None, limit=5)
             if form_files:
                 text = (
-                    "Tìm thấy biểu mẫu/tài liệu phù hợp trên SharePoint."
-                    "\n\nTài liệu/biểu mẫu SharePoint liên quan:\n"
+                    "Bạn có thể tham khảo các mẫu phù hợp trên SharePoint:"
+                    "\n"
                     + format_file_references(form_files, include_file_links)
                 )
                 return AgentAnswer(text=text, files=form_files)
 
-        docs = get_relevant_documents(query)
+        docs = get_relevant_documents(effective_query)
         context = _format_context(docs)
-        files = find_related_files(query, docs[:8])
+        files = find_related_files(effective_query, docs[:8])
 
         if not context:
             text = NO_SHAREPOINT_MATCH
             if files:
                 if intent == "form":
-                    text = "Tìm thấy biểu mẫu/tài liệu phù hợp trên SharePoint."
-                text += "\n\nTài liệu/biểu mẫu SharePoint liên quan:\n" + format_file_references(files, include_file_links)
+                    text = "Bạn có thể tham khảo các mẫu phù hợp trên SharePoint:"
+                text += "\n" + format_file_references(files, include_file_links)
             return AgentAnswer(text=text, files=files)
 
         llm = ChatGoogleGenerativeAI(
@@ -528,17 +610,17 @@ def answer_query(query: str, include_file_links: bool = True) -> AgentAnswer:
             google_api_key=_gemini_key(),
         )
         chain = ANSWER_PROMPT | llm | StrOutputParser()
-        answer = chain.invoke({"question": query, "context": context}).strip()
+        answer = chain.invoke({"question": effective_query, "context": context}).strip()
 
         if answer.strip() == NO_SHAREPOINT_MATCH and files and intent == "form":
-            answer = "Tìm thấy biểu mẫu/tài liệu phù hợp trên SharePoint."
+            answer = "Bạn có thể tham khảo các mẫu phù hợp trên SharePoint:"
 
         sources = _unique_sources(docs[:6])
         if sources:
             answer += "\n\nNguồn đã tra cứu:\n" + "\n".join(f"- {source}" for source in sources)
 
         if files:
-            answer += "\n\nTài liệu/biểu mẫu SharePoint liên quan:\n" + format_file_references(files, include_file_links)
+            answer += "\n\nBạn có thể tham khảo mẫu liên quan:\n" + format_file_references(files, include_file_links)
 
         return AgentAnswer(text=answer, files=files)
     except Exception as e:

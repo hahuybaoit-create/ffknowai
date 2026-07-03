@@ -46,6 +46,51 @@ DOWNLOAD_MIME_TYPES = {
     ".txt": "text/plain",
 }
 
+FORM_SET_DEFINITIONS = {
+    "cong_tac": {
+        "triggers": ("cong tac", "di cong tac", "qd cong tac", "quyet dinh cong tac"),
+        "intro": "Để thực hiện công tác, bạn có thể tham khảo các biểu mẫu sau:",
+        "link_intro": "Bạn có thể tham khảo mẫu công tác tại các liên kết sau:",
+        "items": (
+            {
+                "label": "Phiếu kế hoạch công tác",
+                "patterns": ("phieu ke hoach cong tac",),
+            },
+            {
+                "label": "Quyết định công tác",
+                "patterns": ("mau qd cong tac", "quyet dinh cong tac"),
+            },
+            {
+                "label": "Đề nghị tạm ứng, hoàn ứng, thanh toán",
+                "patterns": ("bieu mau tam ung thanh toan", "tam ung thanh toan"),
+            },
+        ),
+    },
+    "nghi_viec": {
+        "triggers": ("nghi viec", "thoi viec", "cham dut hdld", "bo nghi viec"),
+        "intro": "Bộ nghỉ việc gồm các tài liệu sau:",
+        "link_intro": "Bạn có thể tham khảo mẫu nghỉ việc tại các liên kết sau:",
+        "items": (
+            {
+                "label": "Đơn xin nghỉ việc",
+                "patterns": ("don xin nghi viec",),
+            },
+            {
+                "label": "Quyết định nghỉ việc",
+                "patterns": ("quyet dinh cham dut hdld", "quyet dinh cham dut"),
+            },
+            {
+                "label": "Biên bản thanh lý HĐLĐ",
+                "patterns": ("bien ban thanh ly hdtv hdld", "bien ban thanh ly"),
+            },
+            {
+                "label": "Xác nhận thôi việc",
+                "patterns": ("xac nhan nghi viec", "xac nhan thoi viec"),
+            },
+        ),
+    },
+}
+
 
 @dataclass(frozen=True)
 class FileReference:
@@ -195,6 +240,25 @@ def _to_file_reference(path: Path, manifest_items: dict[str, dict]) -> FileRefer
     )
 
 
+def _file_reference_url(file: FileReference, include_links: bool = True) -> str | None:
+    if file.web_url:
+        return file.web_url
+    if include_links and file.download_url:
+        return file.download_url
+    return None
+
+
+def _display_file_name(file: FileReference) -> str:
+    return file.name
+
+
+def _markdown_file_link(file: FileReference, include_links: bool = True) -> str:
+    url = _file_reference_url(file, include_links)
+    if url:
+        return f"[đây]({url})"
+    return file.relative_path
+
+
 def manifest_item_for_path(path: str) -> dict:
     manifest_items = _manifest_by_relative_path()
     normalized_path = _normalize_relative_path(path)
@@ -206,6 +270,88 @@ def manifest_item_for_path(path: str) -> dict:
         if relative_path.endswith(normalized_path) or Path(relative_path).name == path_name:
             return manifest_item
     return {}
+
+
+def _find_file_by_patterns(patterns: tuple[str, ...], files: list[Path]) -> Path | None:
+    best: tuple[int, str, Path] | None = None
+    for path in files:
+        relative_path = _normalize_text(_normalize_relative_path(str(path.relative_to(DATA_DIR))))
+        score = 0
+        for pattern in patterns:
+            if pattern in relative_path:
+                score += 3
+                continue
+            pattern_terms = [term for term in pattern.split() if len(term) >= 3]
+            if pattern_terms and all(term in relative_path for term in pattern_terms):
+                score += 2
+        if score <= 0:
+            continue
+        candidate = (score, relative_path, path)
+        if best is None or candidate[0] > best[0] or candidate[1] < best[1]:
+            best = candidate
+    return best[2] if best else None
+
+
+def _form_set_key(query: str) -> str | None:
+    normalized_query = _normalize_text(query)
+    has_form_signal = any(
+        term in normalized_query
+        for term in ("bieu mau", "mau", "form", "template", "bo", "tai", "download", "file")
+    )
+    for key, definition in FORM_SET_DEFINITIONS.items():
+        if any(trigger in normalized_query for trigger in definition["triggers"]):
+            if has_form_signal or key in {"cong_tac", "nghi_viec"}:
+                return key
+    return None
+
+
+def find_form_set_files(query: str) -> list[tuple[str, FileReference]]:
+    key = _form_set_key(query)
+    if not key:
+        return []
+
+    files = document_files()
+    if not files:
+        return []
+
+    manifest_items = _manifest_by_relative_path()
+    matched: list[tuple[str, FileReference]] = []
+    for item in FORM_SET_DEFINITIONS[key]["items"]:
+        path = _find_file_by_patterns(item["patterns"], files)
+        if path:
+            matched.append((item["label"], _to_file_reference(path, manifest_items)))
+    return matched
+
+
+def build_form_set_answer(
+    query: str,
+    include_links: bool = True,
+) -> tuple[str, list[FileReference]] | None:
+    key = _form_set_key(query)
+    if not key:
+        return None
+
+    definition = FORM_SET_DEFINITIONS[key]
+    matched = find_form_set_files(query)
+    if not matched:
+        return None
+
+    files = [file for _, file in matched]
+    file_by_label = {label: file for label, file in matched}
+    lines = [definition["intro"], ""]
+
+    for item in definition["items"]:
+        file = file_by_label.get(item["label"])
+        if file:
+            lines.append(f"* {item['label']}: **{_display_file_name(file)}**")
+        else:
+            lines.append(f"* {item['label']}")
+
+    lines.extend(["", definition["link_intro"]])
+    for index, (label, file) in enumerate(matched, start=1):
+        lines.append(f"{index}. {label}: tại {_markdown_file_link(file, include_links)}")
+
+    return "\n".join(lines), files
 
 
 def find_related_files(query: str, docs: list | None = None, limit: int = 6) -> list[FileReference]:
@@ -302,12 +448,11 @@ def format_file_references(files: list[FileReference], include_links: bool = Fal
         return ""
     lines = []
     for file in files:
-        if file.web_url:
-            lines.append(f"- {file.name}: {file.web_url}")
-        elif include_links and file.download_url:
-            lines.append(f"- {file.name}: {file.download_url}")
+        url = _file_reference_url(file, include_links)
+        if url:
+            lines.append(f"- Bạn có thể tham khảo mẫu **{file.name}** tại [đây]({url})")
         else:
-            lines.append(f"- {file.name} ({file.relative_path})")
+            lines.append(f"- Bạn có thể tham khảo mẫu **{file.name}** tại `{file.relative_path}`")
     return "\n".join(lines)
 
 

@@ -12,6 +12,7 @@ load_dotenv()
 
 LOGGER = logging.getLogger(__name__)
 ZALO_SEND_MESSAGE_URL = "https://openapi.zalo.me/v3.0/oa/message/cs"
+USER_LAST_QUESTIONS: dict[str, str] = {}
 
 
 @dataclass
@@ -174,7 +175,13 @@ def answer_zalo_message(message: ZaloIncomingMessage) -> str:
         send_text_message(message.user_id, answer)
         return answer
 
-    answer_result = answer_query(message.text, include_file_links=True)
+    conversation_context = USER_LAST_QUESTIONS.get(message.user_id)
+    answer_result = answer_query(
+        message.text,
+        include_file_links=True,
+        conversation_context=conversation_context,
+    )
+    USER_LAST_QUESTIONS[message.user_id] = message.text
     answer = answer_result.text
     LOGGER.info(
         "AI answer generated for Zalo user_id=%s answer_len=%s",

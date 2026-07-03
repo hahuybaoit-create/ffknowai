@@ -270,6 +270,13 @@ index_is_current = _index_matches_sources()
 if "messages" not in st.session_state:
     st.session_state["messages"] = []
 
+
+def _last_user_context() -> str | None:
+    for message in reversed(st.session_state["messages"]):
+        if message.get("role") == "user":
+            return str(message.get("content") or "")
+    return None
+
 for message in st.session_state["messages"]:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
@@ -277,13 +284,14 @@ for message in st.session_state["messages"]:
             _render_downloads(message.get("downloads", []), f"history_{id(message)}")
 
 if prompt := st.chat_input("Hãy nhập câu hỏi của bạn, ví dụ: Quy định nghỉ phép năm là gì?"):
+    conversation_context = _last_user_context()
     st.session_state["messages"].append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
         with st.spinner("Đang tra cứu tài liệu..."):
-            answer_result = answer_query(prompt)
+            answer_result = answer_query(prompt, conversation_context=conversation_context)
             response = answer_result.text
             st.markdown(response)
             downloads = file_references_to_downloads(answer_result.files) or _download_matches(prompt)
