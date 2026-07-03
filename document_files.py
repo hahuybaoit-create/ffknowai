@@ -97,6 +97,19 @@ FORM_SET_DEFINITIONS = {
 }
 
 SINGLE_FORM_DEFINITIONS = {
+    "danh_gia_thu_viec": {
+        "triggers": (
+            "danh gia thu viec",
+            "mau danh gia thu viec",
+            "bieu mau danh gia thu viec",
+            "gui toi mau danh gia thu viec",
+            "gui giup toi mau danh gia thu viec",
+            "danh gia nhan su tts hoc viec thu viec dinh ky",
+        ),
+        "patterns": ("danh gia nhan su tts hoc viec thu viec dinh ky",),
+        "intro": "Mẫu đánh giá thử việc theo quy định của Công ty như sau:",
+        "form_name": "Đánh giá nhân sự TTS, học việc, thử việc, định kỳ",
+    },
     "de_nghi_tam_ung": {
         "triggers": (
             "de nghi tam ung",
@@ -389,14 +402,14 @@ def build_single_form_answer(
         return None
 
     text = "\n".join(
-        [
+        [line for line in (
             definition["intro"],
             "",
-            f"* Mã biểu mẫu: {definition['form_code']}",
+            f"* Mã biểu mẫu: {definition['form_code']}" if definition.get("form_code") else None,
             f"* Tên biểu mẫu: {definition['form_name']}",
             "",
             f"Bạn có thể tham khảo mẫu tại đường dẫn: {_plain_file_url(file, include_links)}",
-        ]
+        ) if line is not None]
     )
     return text, [file]
 

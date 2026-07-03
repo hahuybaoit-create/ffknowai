@@ -6,6 +6,9 @@ import sys
 import time
 from pathlib import Path
 
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+
+from chromadb.config import Settings
 from dotenv import load_dotenv
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader, TextLoader
@@ -171,7 +174,11 @@ def build_index() -> None:
     )
 
     print("Dang tao embeddings va luu vao ChromaDB tam...")
-    vector_store = Chroma(persist_directory=str(CHROMA_DB_TMP_DIR), embedding_function=embeddings)
+    vector_store = Chroma(
+        persist_directory=str(CHROMA_DB_TMP_DIR),
+        embedding_function=embeddings,
+        client_settings=Settings(anonymized_telemetry=False),
+    )
 
     batch_size = int(os.getenv("EMBEDDING_BATCH_SIZE", "40"))
     batch_sleep = float(os.getenv("EMBEDDING_BATCH_SLEEP", "65"))

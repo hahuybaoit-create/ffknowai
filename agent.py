@@ -7,6 +7,7 @@ from typing import Iterable
 
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 
+from chromadb.config import Settings
 from dotenv import load_dotenv
 from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader, TextLoader
 from langchain_community.vectorstores import Chroma
@@ -133,6 +134,32 @@ def _unique_sources(docs: Iterable[Document]) -> list[str]:
     return sources
 
 
+def _unique_source_links(docs: Iterable[Document], limit: int = 3) -> list[tuple[str, str]]:
+    links: list[tuple[str, str]] = []
+    seen_urls: set[str] = set()
+    for doc in docs:
+        metadata = doc.metadata or {}
+        url = metadata.get("web_url")
+        if not url:
+            manifest_item = manifest_item_for_path(
+                str(
+                    metadata.get("relative_path")
+                    or metadata.get("sharepoint_relative_path")
+                    or metadata.get("source")
+                    or metadata.get("file_name")
+                    or ""
+                )
+            )
+            url = manifest_item.get("web_url")
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        links.append((_source_label(doc).split(", trang", 1)[0], str(url)))
+        if len(links) >= limit:
+            break
+    return links
+
+
 def _normalize_text(text: str) -> str:
     text = unicodedata.normalize("NFD", text.lower())
     text = "".join(char for char in text if unicodedata.category(char) != "Mn")
@@ -194,6 +221,8 @@ def _intent(query: str) -> str:
 
 def _preferred_source_terms(query: str) -> list[tuple[str, ...]]:
     normalized = _normalize_text(query)
+    if "ho so thanh toan" in normalized:
+        return [("khoi", "ho", "huong", "dan", "ho", "so", "thanh", "toan")]
     if "hoa hong" in normalized and "ctv" in normalized:
         return [("hoa", "hong", "ctv")]
     if "co che" in normalized and "luong" in normalized:
@@ -563,7 +592,11 @@ def get_vector_store() -> Chroma:
         model="models/gemini-embedding-001",
         google_api_key=_gemini_key(),
     )
-    return Chroma(persist_directory=CHROMA_DB_DIR, embedding_function=embeddings)
+    return Chroma(
+        persist_directory=CHROMA_DB_DIR,
+        embedding_function=embeddings,
+        client_settings=Settings(anonymized_telemetry=False),
+    )
 
 
 def get_keyword_documents(vector_store: Chroma, query: str, limit: int = 16) -> list[Document]:
@@ -727,6 +760,12 @@ def answer_query(
         sources = _unique_sources(docs[:6])
         if sources:
             answer += "\n\nNguồn đã tra cứu:\n" + "\n".join(f"- {source}" for source in sources)
+
+        source_links = _unique_source_links(docs[:6])
+        if source_links:
+            answer += "\n\nLink tài liệu tham khảo:\n" + "\n".join(
+                f"- {name}: {url}" for name, url in source_links
+            )
 
         if files and intent == "form":
             answer += "\n\nBạn có thể tham khảo mẫu liên quan:\n" + format_file_references(files, include_file_links)
