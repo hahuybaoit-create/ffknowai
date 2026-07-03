@@ -1,4 +1,5 @@
 import gc
+import json
 import os
 import shutil
 import sys
@@ -21,10 +22,32 @@ if hasattr(sys.stdout, "reconfigure"):
 
 SUPPORTED_SUFFIXES = {".pdf", ".docx", ".txt", ".xlsx"}
 IGNORED_FILENAMES = {"_sharepoint_manifest.json"}
+MANIFEST_PATH = DATA_DIR / "_sharepoint_manifest.json"
 
 
 def _clean_text(text: str) -> str:
     return " ".join(str(text).split())
+
+
+def _normalize_relative_path(path: str) -> str:
+    return path.replace("\\", "/").strip("/")
+
+
+def _load_sharepoint_manifest() -> dict[str, dict]:
+    if not MANIFEST_PATH.exists():
+        return {}
+    try:
+        manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    items: dict[str, dict] = {}
+    for item in manifest.get("files", []):
+        for key in ("local_path", "relative_path"):
+            value = item.get(key)
+            if value:
+                items[_normalize_relative_path(value)] = item
+    return items
 
 
 def _load_excel(file_path: Path) -> list[Document]:
@@ -82,6 +105,7 @@ def _source_category(file_path: Path) -> str | None:
 def _load_documents() -> list[Document]:
     documents: list[Document] = []
     files = sorted(path for path in DATA_DIR.rglob("*") if path.is_file())
+    manifest_items = _load_sharepoint_manifest()
 
     for file_path in files:
         if file_path.name in IGNORED_FILENAMES:
@@ -92,9 +116,19 @@ def _load_documents() -> list[Document]:
 
         try:
             loaded_docs = _load_file(file_path)
+            relative_path = _normalize_relative_path(str(file_path.relative_to(DATA_DIR)))
+            manifest_item = manifest_items.get(relative_path) or {}
             for doc in loaded_docs:
                 doc.metadata["source"] = str(file_path)
                 doc.metadata["file_name"] = file_path.name
+                doc.metadata["relative_path"] = relative_path
+                doc.metadata["source_type"] = "sharepoint" if manifest_item else "local"
+                if manifest_item.get("web_url"):
+                    doc.metadata["web_url"] = manifest_item["web_url"]
+                if manifest_item.get("last_modified"):
+                    doc.metadata["last_modified"] = manifest_item["last_modified"]
+                if manifest_item.get("relative_path"):
+                    doc.metadata["sharepoint_relative_path"] = manifest_item["relative_path"]
                 category = _source_category(file_path)
                 if category:
                     doc.metadata["source_category"] = category

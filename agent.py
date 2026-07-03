@@ -12,7 +12,7 @@ from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from document_files import FileReference, find_related_files, format_file_references
+from document_files import FileReference, find_related_files, format_file_references, manifest_item_for_path
 from paths import CHROMA_DB_DIR
 
 load_dotenv()
@@ -32,21 +32,28 @@ ANSWER_PROMPT = ChatPromptTemplate.from_messages(
             "system",
             """
 Bạn là trợ lý AI nội bộ của Flexfit, chỉ trả lời dựa trên trích đoạn tài
-liệu được cung cấp trong mỗi câu hỏi.
+liệu SharePoint được cung cấp trong mỗi câu hỏi.
 
 Luật bắt buộc:
 - Không dùng kiến thức chung, internet, kinh nghiệm cá nhân, mẫu email/mẫu đơn
   chung, hoặc giả định ngoài tài liệu.
-- Không viết các câu kiểu "thông thường", "phổ biến", "tùy công ty", trừ khi
-  chính tài liệu nói như vậy.
+- Phân tích đúng ý định câu hỏi và chỉ trả lời trong phạm vi ý định đó.
+- Trả lời trực tiếp trọng tâm trước; chỉ bổ sung chi tiết liên quan khi thật cần.
+- Không viết lan man, không đưa thông tin ngoài phạm vi câu hỏi.
+- Không viết các câu kiểu "thông thường", "phổ biến", "tùy công ty", trừ khi chính tài liệu nói như vậy.
 - Nếu tài liệu không đủ căn cứ, chỉ trả lời:
-  "Tôi chưa tìm thấy thông tin này trong bộ tài liệu đã cung cấp."
+  "Không tìm thấy tài liệu phù hợp trên SharePoint."
 - Mỗi ý quan trọng phải có trích dẫn [Nguồn: tên_file, trang X]. Nếu nguồn
   không có số trang, dùng [Nguồn: tên_file].
+- Khi context có nhiều tài liệu phù hợp, ưu tiên tài liệu có ngày cập nhật mới nhất.
+- Nếu câu hỏi hỏi về quy trình, biểu mẫu, template, form hoặc file tải về, phải nêu đúng tài liệu/biểu mẫu và đường dẫn SharePoint nếu có trong context.
 - Nếu câu hỏi yêu cầu danh sách có số lượng cụ thể, ví dụ "10 chiêu thức",
   và context có đủ các mục, phải liệt kê đủ đúng số mục theo tài liệu, không
   tự ý rút gọn bỏ mục.
-- Trả lời tiếng Việt, ngắn gọn, bám sát nguyên văn tài liệu.
+- Trả lời tiếng Việt, ngắn gọn, bám sát nguyên văn tài liệu. Cấu trúc mặc định:
+  1) Câu trả lời chính.
+  2) Chi tiết cần biết, nếu có.
+  3) Tài liệu/biểu mẫu SharePoint liên quan, nếu có.
 """,
         ),
         (
@@ -59,12 +66,14 @@ CÂU HỎI:
 {question}
 
 Hãy trả lời chỉ từ context trên. Nếu context chỉ có hướng dẫn thao tác, chỉ trả
-lời hướng dẫn thao tác. Nếu context không có quy định chi tiết, nói rõ chưa tìm
-thấy trong tài liệu.
+lời hướng dẫn thao tác. Nếu context không có quy định chi tiết hoặc không khớp
+câu hỏi, trả lời đúng câu: "Không tìm thấy tài liệu phù hợp trên SharePoint."
 """,
         ),
     ]
 )
+
+NO_SHAREPOINT_MATCH = "Không tìm thấy tài liệu phù hợp trên SharePoint."
 
 
 def _gemini_key() -> str:
@@ -93,7 +102,13 @@ def _format_context(docs: Iterable[Document]) -> str:
         content = " ".join(doc.page_content.split())
         if not content:
             continue
-        formatted.append(f"[Đoạn {index} | Nguồn: {_source_label(doc)}]\n{content}")
+        updated = doc.metadata.get("last_modified") or "không rõ"
+        web_url = doc.metadata.get("web_url") or ""
+        source_line = f"[Đoạn {index} | Nguồn: {_source_label(doc)} | Cập nhật: {updated}"
+        if web_url:
+            source_line += f" | SharePoint: {web_url}"
+        source_line += "]"
+        formatted.append(f"{source_line}\n{content}")
     return "\n\n".join(formatted)
 
 
@@ -136,6 +151,108 @@ def _query_terms(query: str) -> list[str]:
         if len(term) >= 3 and term not in stop_words and term not in terms:
             terms.append(term)
     return terms
+
+
+def _intent(query: str) -> str:
+    normalized = _normalize_text(query)
+    if any(term in normalized for term in ("bieu mau", "mau don", "template", "form", "phieu", "don xin", "tai file", "download")):
+        return "form"
+    if any(term in normalized for term in ("quy trinh", "huong dan", "cac buoc", "thao tac", "lam the nao", "nhu the nao")):
+        return "process"
+    if any(term in normalized for term in ("quy dinh", "chinh sach", "quy che", "noi quy", "che do")):
+        return "policy"
+    return "general"
+
+
+def _metadata_text(doc: Document) -> str:
+    metadata = doc.metadata or {}
+    values = [
+        metadata.get("file_name"),
+        metadata.get("relative_path"),
+        metadata.get("sharepoint_relative_path"),
+        metadata.get("source_category"),
+        metadata.get("source"),
+    ]
+    return " ".join(str(value) for value in values if value)
+
+
+def _document_date(doc: Document) -> str:
+    metadata = doc.metadata or {}
+    explicit = str(metadata.get("last_modified") or "")
+    if explicit:
+        return explicit
+    source = str(metadata.get("file_name") or metadata.get("source") or "")
+    match = re.search(r"\b(20\d{2})(\d{2})(\d{2})\b", source)
+    if match:
+        return f"{match.group(1)}-{match.group(2)}-{match.group(3)}T00:00:00Z"
+    match = re.search(r"\b(20\d{2})(\d{2})\b", source)
+    if match:
+        return f"{match.group(1)}-{match.group(2)}-01T00:00:00Z"
+    return ""
+
+
+def _enrich_sharepoint_metadata(doc: Document) -> Document:
+    metadata = dict(doc.metadata or {})
+    if metadata.get("web_url") and metadata.get("last_modified"):
+        return doc
+
+    candidates = [
+        metadata.get("relative_path"),
+        metadata.get("sharepoint_relative_path"),
+        metadata.get("source"),
+        metadata.get("file_name"),
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        manifest_item = manifest_item_for_path(str(candidate))
+        if not manifest_item:
+            continue
+        metadata.setdefault("web_url", manifest_item.get("web_url"))
+        metadata.setdefault("last_modified", manifest_item.get("last_modified"))
+        metadata.setdefault("sharepoint_relative_path", manifest_item.get("relative_path"))
+        metadata["source_type"] = "sharepoint"
+        return Document(page_content=doc.page_content, metadata=metadata)
+    return doc
+
+
+def _doc_relevance_score(doc: Document, query: str, intent: str) -> int:
+    terms = _query_terms(query)
+    normalized_content = _normalize_text(doc.page_content)
+    normalized_metadata = _normalize_text(_metadata_text(doc))
+    score = 0
+    score += sum(3 for term in terms if term in normalized_metadata)
+    score += sum(1 for term in terms if term in normalized_content)
+
+    if intent == "form":
+        if any(term in normalized_metadata for term in ("bieu mau", "template", "form", "phieu", "don")):
+            score += 12
+    elif intent == "process":
+        if any(term in normalized_metadata for term in ("quy trinh", "huong dan")):
+            score += 6
+    elif intent == "policy":
+        if any(term in normalized_metadata for term in ("quy dinh", "chinh sach", "quy che", "noi quy")):
+            score += 6
+
+    if doc.metadata.get("web_url") or doc.metadata.get("source_type") == "sharepoint":
+        score += 2
+    return score
+
+
+def _rank_and_filter_documents(docs: Iterable[Document], query: str) -> list[Document]:
+    intent = _intent(query)
+    ranked: list[tuple[int, str, int, Document]] = []
+    for index, doc in enumerate(docs):
+        enriched = _enrich_sharepoint_metadata(doc)
+        score = _doc_relevance_score(enriched, query, intent)
+        if score <= 0:
+            continue
+        ranked.append((score, _document_date(enriched), index, enriched))
+
+    ranked.sort(key=lambda item: item[2])
+    ranked.sort(key=lambda item: item[1], reverse=True)
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    return [doc for _, _, _, doc in ranked]
 
 
 def _is_numbered_list_query(query: str) -> bool:
@@ -367,7 +484,7 @@ def get_relevant_documents(query: str) -> list[Document]:
         priority_docs = get_tam_phap_management_documents(vector_store)
 
     if priority_docs:
-        return priority_docs[:24]
+        return _rank_and_filter_documents(priority_docs, query)[:24] or priority_docs[:24]
 
     keyword_docs = get_keyword_documents(vector_store, query)
     vector_docs = retriever.invoke(query)
@@ -376,21 +493,34 @@ def get_relevant_documents(query: str) -> list[Document]:
     if _is_numbered_list_query(query) and not priority_docs:
         expanded_docs = get_neighbor_documents(vector_store, seed_docs[:5], page_radius=2)
 
-    return _merge_documents(priority_docs, expanded_docs, keyword_docs, vector_docs)[:32]
+    docs = _merge_documents(priority_docs, expanded_docs, keyword_docs, vector_docs)
+    return _rank_and_filter_documents(docs, query)[:32]
 
 
-def answer_query(query: str, include_file_links: bool = False) -> AgentAnswer:
+def answer_query(query: str, include_file_links: bool = True) -> AgentAnswer:
     try:
+        intent = _intent(query)
+        if intent == "form":
+            form_files = find_related_files(query, None, limit=5)
+            if form_files:
+                text = (
+                    "Tìm thấy biểu mẫu/tài liệu phù hợp trên SharePoint."
+                    "\n\nTài liệu/biểu mẫu SharePoint liên quan:\n"
+                    + format_file_references(form_files, include_file_links)
+                )
+                return AgentAnswer(text=text, files=form_files)
+
         docs = get_relevant_documents(query)
         context = _format_context(docs)
         files = find_related_files(query, docs[:8])
 
         if not context:
-            text = "Tôi chưa tìm thấy thông tin này trong bộ tài liệu đã cung cấp."
+            text = NO_SHAREPOINT_MATCH
             if files:
-                text += "\n\nFile liên quan:\n" + format_file_references(files, include_file_links)
+                if intent == "form":
+                    text = "Tìm thấy biểu mẫu/tài liệu phù hợp trên SharePoint."
+                text += "\n\nTài liệu/biểu mẫu SharePoint liên quan:\n" + format_file_references(files, include_file_links)
             return AgentAnswer(text=text, files=files)
-            return "Tôi chưa tìm thấy thông tin này trong bộ tài liệu đã cung cấp."
 
         llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash",
@@ -400,18 +530,19 @@ def answer_query(query: str, include_file_links: bool = False) -> AgentAnswer:
         chain = ANSWER_PROMPT | llm | StrOutputParser()
         answer = chain.invoke({"question": query, "context": context}).strip()
 
+        if answer.strip() == NO_SHAREPOINT_MATCH and files and intent == "form":
+            answer = "Tìm thấy biểu mẫu/tài liệu phù hợp trên SharePoint."
+
         sources = _unique_sources(docs[:6])
         if sources:
             answer += "\n\nNguồn đã tra cứu:\n" + "\n".join(f"- {source}" for source in sources)
 
         if files:
-            answer += "\n\nFile liên quan:\n" + format_file_references(files, include_file_links)
+            answer += "\n\nTài liệu/biểu mẫu SharePoint liên quan:\n" + format_file_references(files, include_file_links)
 
         return AgentAnswer(text=answer, files=files)
-        return answer
     except Exception as e:
         return AgentAnswer(text=f"Lỗi trong quá trình xử lý: {e}", files=[])
-        return f"Lỗi trong quá trình xử lý: {e}"
 
 
 def ask_agent(query: str) -> str:

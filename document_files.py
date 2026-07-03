@@ -55,6 +55,7 @@ class FileReference:
     mime: str
     web_url: str | None = None
     download_url: str | None = None
+    last_modified: str | None = None
 
 
 def _env(name: str, default: str = "") -> str:
@@ -190,7 +191,21 @@ def _to_file_reference(path: Path, manifest_items: dict[str, dict]) -> FileRefer
         mime=DOWNLOAD_MIME_TYPES.get(path.suffix.lower(), "application/octet-stream"),
         web_url=manifest_item.get("web_url"),
         download_url=_file_url(relative_path),
+        last_modified=manifest_item.get("last_modified"),
     )
+
+
+def manifest_item_for_path(path: str) -> dict:
+    manifest_items = _manifest_by_relative_path()
+    normalized_path = _normalize_relative_path(path)
+    item = manifest_items.get(normalized_path)
+    if item:
+        return item
+    path_name = Path(normalized_path).name
+    for relative_path, manifest_item in manifest_items.items():
+        if relative_path.endswith(normalized_path) or Path(relative_path).name == path_name:
+            return manifest_item
+    return {}
 
 
 def find_related_files(query: str, docs: list | None = None, limit: int = 6) -> list[FileReference]:
@@ -199,16 +214,32 @@ def find_related_files(query: str, docs: list | None = None, limit: int = 6) -> 
         return []
 
     manifest_items = _manifest_by_relative_path()
-    normalized_query = _normalize_text(query)
     terms = [
         term
         for term in _query_terms(query)
         if term not in {"bieu", "mau", "form", "tai", "download", "file"}
     ]
+    normalized_query = _normalize_text(query)
+    phrase_boosts = [
+        "thanh toan",
+        "tam ung",
+        "nghi phep",
+        "cong tac",
+        "may tinh",
+        "dieu chuyen",
+        "cham dut",
+        "bo nhiem",
+    ]
+    relevant_phrases = [phrase for phrase in phrase_boosts if phrase in normalized_query]
+    wants_form = any(term in normalized_query for term in ("bieu mau", "mau", "form", "template"))
 
     source_paths: set[str] = set()
     for doc in docs or []:
         metadata = getattr(doc, "metadata", {}) or {}
+        for key in ("relative_path", "sharepoint_relative_path"):
+            value = metadata.get(key)
+            if value:
+                source_paths.add(_normalize_relative_path(str(value)))
         source = metadata.get("source")
         if not source:
             continue
@@ -217,29 +248,45 @@ def find_related_files(query: str, docs: list | None = None, limit: int = 6) -> 
         except ValueError:
             source_paths.add(_normalize_relative_path(Path(str(source)).name))
 
-    ranked: list[tuple[int, str, Path]] = []
+    ranked: list[tuple[int, str, str, Path]] = []
     download_query = _is_download_query(query)
     for path in files:
         relative_path = _normalize_relative_path(str(path.relative_to(DATA_DIR)))
         normalized_path = _normalize_text(relative_path)
+        manifest_item = manifest_items.get(relative_path) or {}
         score = 0
+        form_like = any(
+            term in normalized_path
+            for term in ("bieu mau", "template", "mau", "phieu", "don", "de nghi", "de xuat")
+        )
 
-        if relative_path in source_paths or path.name in source_paths:
+        matched_source = relative_path in source_paths or path.name in source_paths
+        if not download_query and not matched_source:
+            continue
+        if wants_form and not form_like:
+            continue
+        if wants_form and relevant_phrases and not any(phrase in normalized_path for phrase in relevant_phrases):
+            continue
+
+        if matched_source:
             score += 20
-        if "bieu mau" in normalized_path or "bieu_mau" in normalized_path:
+        if form_like:
             score += 7
         if download_query:
             score += 3
         score += sum(2 for term in terms if term in normalized_path)
+        score += sum(8 for phrase in relevant_phrases if phrase in normalized_path)
 
         if score <= 0:
             continue
-        ranked.append((score, relative_path.lower(), path))
+        ranked.append((score, manifest_item.get("last_modified", ""), relative_path.lower(), path))
 
-    ranked.sort(key=lambda item: (-item[0], item[1]))
+    ranked.sort(key=lambda item: item[2])
+    ranked.sort(key=lambda item: item[1], reverse=True)
+    ranked.sort(key=lambda item: item[0], reverse=True)
     references: list[FileReference] = []
     seen: set[str] = set()
-    for _, _, path in ranked:
+    for _, _, _, path in ranked:
         relative_path = _normalize_relative_path(str(path.relative_to(DATA_DIR)))
         if relative_path in seen:
             continue
@@ -255,10 +302,10 @@ def format_file_references(files: list[FileReference], include_links: bool = Fal
         return ""
     lines = []
     for file in files:
-        if include_links and file.download_url:
-            lines.append(f"- {file.name}: {file.download_url}")
-        elif include_links and file.web_url:
+        if file.web_url:
             lines.append(f"- {file.name}: {file.web_url}")
+        elif include_links and file.download_url:
+            lines.append(f"- {file.name}: {file.download_url}")
         else:
             lines.append(f"- {file.name} ({file.relative_path})")
     return "\n".join(lines)
