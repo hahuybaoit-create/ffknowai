@@ -87,6 +87,14 @@ câu hỏi, trả lời đúng câu: "Không tìm thấy tài liệu phù hợp 
 )
 
 NO_SHAREPOINT_MATCH = "Không tìm thấy tài liệu phù hợp trên SharePoint."
+MISSING_SYSTEM_INFO_MESSAGE = (
+    "Thông tin này hiện chưa có trong hệ thống, "
+    "FlexFit sẽ cập nhật và hỗ trợ bạn sớm."
+)
+OUT_OF_SCOPE_MESSAGE = (
+    "FF Know AI được hỗ trợ để tra cứu thông tin nội bộ của FlexFit, "
+    "vui lòng đặt câu hỏi liên quan khác."
+)
 
 
 def _gemini_key() -> str:
@@ -217,6 +225,60 @@ def _intent(query: str) -> str:
     if any(term in normalized for term in ("quy dinh", "chinh sach", "quy che", "noi quy", "che do")):
         return "policy"
     return "general"
+
+
+def _is_out_of_scope_query(query: str) -> bool:
+    normalized = _normalize_text(query)
+    allowed_lookup_terms = (
+        "quy trinh",
+        "quy dinh",
+        "chinh sach",
+        "bieu mau",
+        "mau",
+        "form",
+        "template",
+        "tai lieu",
+        "link",
+        "duong dan",
+        "ho so",
+        "bo nghi viec",
+        "don xin nghi viec",
+    )
+    if any(term in normalized for term in allowed_lookup_terms):
+        return False
+
+    personal_action_patterns = (
+        "toi muon nghi",
+        "em muon nghi",
+        "minh muon nghi",
+        "muon nghi han",
+        "muon nghi viec",
+        "xin nghi han",
+        "nghi han viec",
+        "lien he ai",
+        "gap ai",
+        "hoi ai",
+        "bao ai",
+        "nen lam gi",
+        "toi can lam gi",
+        "em can lam gi",
+        "tu van",
+    )
+    hr_action_topics = ("nghi viec", "nghi han", "thoi viec", "xin nghi")
+    return any(pattern in normalized for pattern in personal_action_patterns) and any(
+        topic in normalized for topic in hr_action_topics
+    )
+
+
+def _is_known_missing_system_info_query(query: str) -> bool:
+    normalized = _normalize_text(query)
+    missing_patterns = (
+        ("tien do", "dat chuan"),
+        ("tien do", "phai nhu the nao"),
+        ("tien do", "tieu chuan"),
+        ("tien do", "chuan"),
+    )
+    return any(all(term in normalized for term in pattern) for pattern in missing_patterns)
 
 
 def _preferred_source_terms(query: str) -> list[tuple[str, ...]]:
@@ -703,6 +765,11 @@ def answer_query(
 ) -> AgentAnswer:
     try:
         effective_query = _resolve_followup_query(query, conversation_context)
+        if _is_out_of_scope_query(effective_query):
+            return AgentAnswer(text=OUT_OF_SCOPE_MESSAGE, files=[])
+        if _is_known_missing_system_info_query(effective_query):
+            return AgentAnswer(text=MISSING_SYSTEM_INFO_MESSAGE, files=[])
+
         single_form_answer = build_single_form_answer(effective_query, include_file_links)
         if single_form_answer:
             text, files = single_form_answer
@@ -739,7 +806,7 @@ def answer_query(
         files = find_related_files(effective_query, docs[:8]) if intent == "form" else []
 
         if not context:
-            text = NO_SHAREPOINT_MATCH
+            text = MISSING_SYSTEM_INFO_MESSAGE
             if files:
                 if intent == "form":
                     text = "Bạn có thể tham khảo các mẫu phù hợp trên SharePoint:"
@@ -756,6 +823,8 @@ def answer_query(
 
         if answer.strip() == NO_SHAREPOINT_MATCH and files and intent == "form":
             answer = "Bạn có thể tham khảo các mẫu phù hợp trên SharePoint:"
+        elif answer.strip() == NO_SHAREPOINT_MATCH:
+            return AgentAnswer(text=MISSING_SYSTEM_INFO_MESSAGE, files=[])
 
         sources = _unique_sources(docs[:6])
         if sources:
