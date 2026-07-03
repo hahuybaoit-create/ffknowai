@@ -14,7 +14,9 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from document_files import (
     FileReference,
+    build_document_shortcut_answer,
     build_form_set_answer,
+    build_single_form_answer,
     find_related_files,
     format_file_references,
     manifest_item_for_path,
@@ -576,9 +578,19 @@ def answer_query(
 ) -> AgentAnswer:
     try:
         effective_query = _resolve_followup_query(query, conversation_context)
+        single_form_answer = build_single_form_answer(effective_query, include_file_links)
+        if single_form_answer:
+            text, files = single_form_answer
+            return AgentAnswer(text=text, files=files)
+
         form_set_answer = build_form_set_answer(effective_query, include_file_links)
         if form_set_answer:
             text, files = form_set_answer
+            return AgentAnswer(text=text, files=files)
+
+        document_shortcut_answer = build_document_shortcut_answer(effective_query, include_file_links)
+        if document_shortcut_answer:
+            text, files = document_shortcut_answer
             return AgentAnswer(text=text, files=files)
 
         intent = _intent(effective_query)
@@ -594,7 +606,7 @@ def answer_query(
 
         docs = get_relevant_documents(effective_query)
         context = _format_context(docs)
-        files = find_related_files(effective_query, docs[:8])
+        files = find_related_files(effective_query, docs[:8]) if intent == "form" else []
 
         if not context:
             text = NO_SHAREPOINT_MATCH
@@ -619,7 +631,7 @@ def answer_query(
         if sources:
             answer += "\n\nNguồn đã tra cứu:\n" + "\n".join(f"- {source}" for source in sources)
 
-        if files:
+        if files and intent == "form":
             answer += "\n\nBạn có thể tham khảo mẫu liên quan:\n" + format_file_references(files, include_file_links)
 
         return AgentAnswer(text=answer, files=files)

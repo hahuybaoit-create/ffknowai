@@ -91,6 +91,36 @@ FORM_SET_DEFINITIONS = {
     },
 }
 
+SINGLE_FORM_DEFINITIONS = {
+    "de_nghi_tam_ung": {
+        "triggers": (
+            "de nghi tam ung",
+            "mau de nghi tam ung",
+            "bieu mau de nghi tam ung",
+            "gui giup toi mau de nghi tam ung",
+        ),
+        "patterns": ("bieu mau tam ung thanh toan", "tam ung thanh toan"),
+        "intro": "Mẫu đề nghị tạm ứng theo quy định của Công ty như sau:",
+        "form_code": "BMTT19.01",
+        "form_name": "Đề nghị tạm ứng",
+    },
+}
+
+DOCUMENT_SHORTCUT_DEFINITIONS = {
+    "co_che_luong_bu": {
+        "triggers": (
+            "co che luong",
+            "co che tinh luong",
+            "luong bu",
+            "tinh luong bu",
+            "chinh sach luong bu",
+        ),
+        "patterns": ("co che tinh luong bu",),
+        "intro": "Thông tin cơ chế lương BU cần được tra cứu theo tài liệu hiện hành sau:",
+        "label": "Cơ chế tính lương BU",
+    },
+}
+
 
 @dataclass(frozen=True)
 class FileReference:
@@ -259,6 +289,10 @@ def _markdown_file_link(file: FileReference, include_links: bool = True) -> str:
     return file.relative_path
 
 
+def _plain_file_url(file: FileReference, include_links: bool = True) -> str:
+    return _file_reference_url(file, include_links) or file.relative_path
+
+
 def manifest_item_for_path(path: str) -> dict:
     manifest_items = _manifest_by_relative_path()
     normalized_path = _normalize_relative_path(path)
@@ -292,6 +326,14 @@ def _find_file_by_patterns(patterns: tuple[str, ...], files: list[Path]) -> Path
     return best[2] if best else None
 
 
+def _definition_key(query: str, definitions: dict) -> str | None:
+    normalized_query = _normalize_text(query)
+    for key, definition in definitions.items():
+        if any(trigger in normalized_query for trigger in definition["triggers"]):
+            return key
+    return None
+
+
 def _form_set_key(query: str) -> str | None:
     normalized_query = _normalize_text(query)
     has_form_signal = any(
@@ -303,6 +345,68 @@ def _form_set_key(query: str) -> str | None:
             if has_form_signal or key in {"cong_tac", "nghi_viec"}:
                 return key
     return None
+
+
+def _file_reference_for_patterns(patterns: tuple[str, ...]) -> FileReference | None:
+    files = document_files()
+    if not files:
+        return None
+    path = _find_file_by_patterns(patterns, files)
+    if not path:
+        return None
+    return _to_file_reference(path, _manifest_by_relative_path())
+
+
+def build_single_form_answer(
+    query: str,
+    include_links: bool = True,
+) -> tuple[str, list[FileReference]] | None:
+    key = _definition_key(query, SINGLE_FORM_DEFINITIONS)
+    if not key:
+        return None
+
+    definition = SINGLE_FORM_DEFINITIONS[key]
+    file = _file_reference_for_patterns(definition["patterns"])
+    if not file:
+        return None
+
+    text = "\n".join(
+        [
+            definition["intro"],
+            "",
+            f"* Mã biểu mẫu: {definition['form_code']}",
+            f"* Tên biểu mẫu: {definition['form_name']}",
+            "",
+            f"Bạn có thể tham khảo mẫu tại đường dẫn: {_plain_file_url(file, include_links)}",
+        ]
+    )
+    return text, [file]
+
+
+def build_document_shortcut_answer(
+    query: str,
+    include_links: bool = True,
+) -> tuple[str, list[FileReference]] | None:
+    key = _definition_key(query, DOCUMENT_SHORTCUT_DEFINITIONS)
+    if not key:
+        return None
+
+    definition = DOCUMENT_SHORTCUT_DEFINITIONS[key]
+    file = _file_reference_for_patterns(definition["patterns"])
+    if not file:
+        return None
+
+    text = "\n".join(
+        [
+            definition["intro"],
+            "",
+            f"* Tài liệu: {definition['label']}",
+            f"* File hiện hành: {file.name}",
+            "",
+            f"Bạn có thể tham khảo tài liệu tại đường dẫn: {_plain_file_url(file, include_links)}",
+        ]
+    )
+    return text, [file]
 
 
 def find_form_set_files(query: str) -> list[tuple[str, FileReference]]:
