@@ -35,3 +35,21 @@ services:
         value: /sites/Intranet
       - key: SHAREPOINT_SITE_NAME
         value: Intranet
+      - key: ZALO_OA_ACCESS_TOKEN
+        sync: false
+      - key: ZALO_OA_REFRESH_TOKEN
+        sync: false
+      - key: ZALO_APP_ID
+        sync: false
+      - key: ZALO_APP_SECRET
+        sync: false
+      - key: ZALO_WEBHOOK_SECRET
+        sync: false
+      - key: ZALO_ALLOWED_EVENTS
+        value: user_send_text,user_send_message,user_send_text_message
+      - key: ZALO_MAX_REPLY_CHARS
+        value: "1800"
+      - key: ZALO_VERIFY_META_CONTENT
+        sync: false
+      - key: ADMIN_SYNC_SECRET
+        sync: false

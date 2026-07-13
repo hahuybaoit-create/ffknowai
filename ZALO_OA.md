@@ -6,6 +6,9 @@ Module Zalo OA chay nhu mot web service rieng va dung lai `ask_agent()` de tra l
 
 ```env
 ZALO_OA_ACCESS_TOKEN="..."
+ZALO_OA_REFRESH_TOKEN="..."
+ZALO_APP_ID="..."
+ZALO_APP_SECRET="..."
 ZALO_WEBHOOK_SECRET="chuoi-bi-mat-tu-dat"
 ZALO_ALLOWED_EVENTS="user_send_text"
 ZALO_MAX_REPLY_CHARS=1800
@@ -17,6 +20,10 @@ APP_ACCESS_PASSWORD="mat-khau-vao-giao-dien-web"
 ```
 
 `ZALO_WEBHOOK_SECRET` la chuoi bi mat tu dat. Khi cau hinh webhook tren Zalo OA, them secret vao query string de chan request khong mong muon.
+
+`ZALO_OA_ACCESS_TOKEN` se het han theo vong doi token cua Zalo. Nen cau hinh them
+`ZALO_OA_REFRESH_TOKEN`, `ZALO_APP_ID`, va `ZALO_APP_SECRET` de service tu refresh
+token roi retry mot lan khi Zalo tra loi `Access token has expired`.
 
 ## Chay local
 
@@ -107,6 +114,9 @@ Can cau hinh cac bien moi truong giong service Streamlit, toi thieu:
 ```env
 GEMINI_API_KEY=...
 ZALO_OA_ACCESS_TOKEN=...
+ZALO_OA_REFRESH_TOKEN=...
+ZALO_APP_ID=...
+ZALO_APP_SECRET=...
 ZALO_WEBHOOK_SECRET=...
 FF_APP_DATA_ROOT=/var/data/ff-know-ai
 ```

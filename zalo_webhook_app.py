@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
-from zalo_oa import answer_zalo_message, parse_incoming_message, verify_webhook_secret
+from zalo_oa import answer_zalo_message, get_token_status, parse_incoming_message, verify_webhook_secret
 from document_files import DOWNLOAD_MIME_TYPES, resolve_file_key
 from paths import CHROMA_DB_DIR, DATA_DIR
 
@@ -128,6 +128,7 @@ def debugz(
         if CHROMA_DB_DIR.exists()
         else [],
         "zalo_token_set": bool(os.getenv("ZALO_OA_ACCESS_TOKEN")),
+        "zalo_token_status": get_token_status(),
         "gemini_key_set": bool(os.getenv("GEMINI_API_KEY")),
     }
 
