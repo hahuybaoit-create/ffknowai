@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+import re
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
@@ -459,6 +460,31 @@ def _is_document_reference_query(query: str) -> bool:
     )
 
 
+def _business_unit_aliases(query: str) -> tuple[str, ...]:
+    normalized = _normalize_text(query)
+    compact = "".join(char for char in normalized if char.isalnum())
+    if re.search(r"\bbu\s*1\b", normalized) or "bu1" in compact:
+        return ("jd bu 1", "bu1")
+    if re.search(r"\bbu\s*2\b", normalized) or "bu2" in compact:
+        return ("jd bu 2", "bu2")
+    if re.search(r"\bbu\s*3\b", normalized) or "bu3" in compact:
+        return ("jd bu 3", "bu3")
+    if re.search(r"\bbu\s*hcm\b", normalized) or "buhcm" in compact:
+        return ("jd bu hcm", "buhcm")
+    return ()
+
+
+def _matches_business_unit(normalized_path: str, aliases: tuple[str, ...]) -> bool:
+    if not aliases:
+        return True
+    compact_path = "".join(char for char in normalized_path if char.isalnum())
+    return any(alias in normalized_path or alias.replace(" ", "") in compact_path for alias in aliases)
+
+
+def _dedupe_file_name_key(path: Path) -> str:
+    return "".join(char for char in _normalize_text(path.name) if char.isalnum())
+
+
 def find_document_references(query: str, limit: int = 3) -> list[FileReference]:
     if not _is_document_reference_query(query):
         return []
@@ -491,6 +517,10 @@ def find_document_references(query: str, limit: int = 3) -> list[FileReference]:
         "dinh",
         "ve",
         "cua",
+        "cau",
+        "hoi",
+        "tiep",
+        "theo",
     }
     terms = [term for term in _query_terms(query) if term not in generic_terms]
     phrase_boosts = (
@@ -498,20 +528,28 @@ def find_document_references(query: str, limit: int = 3) -> list[FileReference]:
         "chinh sach hoa hong ctv",
         "co che tinh luong bu",
         "co che luong bu",
+        "nhan vien mua hang",
+        "mua hang",
         "tam ung thanh toan",
         "cong tac",
         "nghi viec",
     )
     relevant_phrases = [phrase for phrase in phrase_boosts if phrase in normalized_query]
+    business_unit_aliases = _business_unit_aliases(query)
 
     ranked: list[tuple[int, str, str, Path]] = []
     manifest_items = _manifest_by_relative_path()
     for path in files:
         relative_path = _normalize_relative_path(str(path.relative_to(DATA_DIR)))
         normalized_path = _normalize_text(relative_path)
+        if business_unit_aliases and not _matches_business_unit(normalized_path, business_unit_aliases):
+            continue
+
         manifest_item = manifest_items.get(relative_path) or {}
         score = sum(3 for term in terms if term in normalized_path)
         score += sum(15 for phrase in relevant_phrases if phrase in normalized_path)
+        if business_unit_aliases:
+            score += 40
 
         if "ctv" in normalized_query and "hoa hong" in normalized_query:
             if "hoa hong ctv" not in normalized_path:
@@ -531,13 +569,18 @@ def find_document_references(query: str, limit: int = 3) -> list[FileReference]:
     top_score = ranked[0][0]
     references: list[FileReference] = []
     seen: set[str] = set()
+    seen_file_names: set[str] = set()
     for score, _, _, path in ranked:
         if score < max(1, top_score - 10):
             continue
         relative_path = _normalize_relative_path(str(path.relative_to(DATA_DIR)))
         if relative_path in seen:
             continue
+        file_name_key = _dedupe_file_name_key(path)
+        if file_name_key in seen_file_names:
+            continue
         seen.add(relative_path)
+        seen_file_names.add(file_name_key)
         references.append(_to_file_reference(path, manifest_items))
         if len(references) >= limit:
             break

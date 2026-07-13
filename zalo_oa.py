@@ -9,7 +9,7 @@ from typing import Any
 import requests
 from dotenv import load_dotenv
 
-from agent import answer_query
+from agent import _resolve_followup_query, answer_query
 from paths import APP_DATA_ROOT
 
 load_dotenv()
@@ -293,12 +293,12 @@ def answer_zalo_message(message: ZaloIncomingMessage) -> str:
         return answer
 
     conversation_context = USER_LAST_QUESTIONS.get(message.user_id)
+    effective_query = _resolve_followup_query(message.text, conversation_context)
     answer_result = answer_query(
-        message.text,
+        effective_query,
         include_file_links=True,
-        conversation_context=conversation_context,
     )
-    USER_LAST_QUESTIONS[message.user_id] = message.text
+    USER_LAST_QUESTIONS[message.user_id] = effective_query
     answer = answer_result.text
     LOGGER.info(
         "AI answer generated for Zalo user_id=%s answer_len=%s",
