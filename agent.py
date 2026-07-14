@@ -463,24 +463,29 @@ def _ocr_pdf_with_gemini(file_path: Path) -> list[Document]:
             model = genai.GenerativeModel(os.getenv("GEMINI_OCR_MODEL", "gemini-2.5-flash"))
             reader = PdfReader(str(file_path))
             max_pages = int(os.getenv("GEMINI_OCR_MAX_PAGES", "20"))
-            page_texts = []
+            images = []
             for page_index, page in enumerate(reader.pages[:max_pages]):
-                images = list(getattr(page, "images", []) or [])
-                if not images:
-                    page_texts.append("")
+                page_images = list(getattr(page, "images", []) or [])
+                if not page_images:
                     continue
-                image = Image.open(io.BytesIO(images[0].data))
-                response = model.generate_content(
-                    [
-                        (
-                            "Trích xuất toàn bộ chữ tiếng Việt trong ảnh tài liệu này. "
-                            "Giữ nguyên số tiền, tỷ lệ, bảng, điều khoản và xuống dòng quan trọng. "
-                            "Chỉ trả về nội dung OCR, không giải thích."
-                        ),
-                        image,
-                    ]
-                )
-                page_texts.append((getattr(response, "text", "") or "").strip())
+                image = Image.open(io.BytesIO(page_images[0].data))
+                images.append(image)
+
+            if not images:
+                return []
+
+            prompt = (
+                "Trích xuất toàn bộ chữ tiếng Việt trong các ảnh tài liệu sau theo đúng thứ tự trang. "
+                "Giữ nguyên số tiền, tỷ lệ, bảng, điều khoản và xuống dòng quan trọng. "
+                "Đặc biệt chú ý các nội dung về đi muộn, đi trễ, chấm công, quên chấm công, phạt, trừ lương. "
+                "Trả về theo định dạng:\n--- TRANG 1 ---\n<nội dung>\n--- TRANG 2 ---\n<nội dung>..."
+            )
+            response = model.generate_content([prompt, *images])
+            ocr_text = (getattr(response, "text", "") or "").strip()
+            page_texts = [ocr_text] if ocr_text else []
+            if not page_texts:
+                for page_index, page in enumerate(reader.pages[:max_pages]):
+                    page_texts.append("")
             _save_ocr_cache(file_path, page_texts)
         except Exception as exc:
             LOGGER.warning("Gemini OCR failed for %s: %s", file_path, exc)
@@ -1078,6 +1083,79 @@ def get_relevant_documents(query: str) -> list[Document]:
     return _rank_and_filter_documents(docs, query)[:32]
 
 
+def _is_quota_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return any(term in message for term in ("429", "quota", "resourceexhausted", "rate limit"))
+
+
+def _relevant_excerpts(query: str, docs: list[Document], limit: int = 5) -> list[tuple[str, str]]:
+    query_terms = set(_query_terms(query))
+    if not query_terms:
+        query_terms = {"phat", "cham", "cong", "muon", "tre", "luong"}
+
+    ranked: list[tuple[int, int, str, str]] = []
+    for doc_index, doc in enumerate(docs):
+        source = _source_label(doc)
+        parts = re.split(r"(?<=[.!?])\s+|\n+", doc.page_content)
+        for part_index, part in enumerate(parts):
+            excerpt = " ".join(part.split())
+            if len(excerpt) < 30:
+                continue
+            normalized = _normalize_text(excerpt)
+            score = sum(1 for term in query_terms if term in normalized)
+            score += sum(
+                3
+                for phrase in (
+                    "quen cham cong",
+                    "cham cong",
+                    "di muon",
+                    "di tre",
+                    "phat",
+                    "tru luong",
+                    "tinh luong",
+                )
+                if phrase in normalized
+            )
+            if score <= 0:
+                continue
+            ranked.append((score, -doc_index, source, excerpt[:650]))
+
+    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    excerpts: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for _, _, source, excerpt in ranked:
+        key = _normalize_text(excerpt[:160])
+        if key in seen:
+            continue
+        seen.add(key)
+        excerpts.append((source, excerpt))
+        if len(excerpts) >= limit:
+            break
+    return excerpts
+
+
+def _quota_fallback_answer(query: str, docs: list[Document], include_file_links: bool) -> AgentAnswer:
+    excerpts = _relevant_excerpts(query, docs)
+    if excerpts:
+        lines = [
+            "Gemini đang hết quota tạm thời nên tôi chưa tổng hợp được câu trả lời hoàn chỉnh. Dưới đây là các đoạn liên quan nhất trong tài liệu:",
+        ]
+        for source, excerpt in excerpts:
+            lines.append(f"- {excerpt} [Nguồn: {source}]")
+    else:
+        lines = [
+            "Gemini đang hết quota tạm thời nên tôi chưa tổng hợp được câu trả lời hoàn chỉnh.",
+            "Tôi đã tìm thấy tài liệu liên quan, bạn có thể mở để kiểm tra trực tiếp:",
+        ]
+
+    source_links = _unique_source_links(docs[:8])
+    if source_links:
+        lines.append("")
+        lines.append("Link tài liệu tham khảo:")
+        lines.extend(f"- {name}: {url}" for name, url in source_links)
+    return AgentAnswer(text="\n".join(lines), files=[])
+
+
 def answer_query(
     query: str,
     include_file_links: bool = True,
@@ -1147,12 +1225,18 @@ def answer_query(
             return AgentAnswer(text=text, files=files)
 
         llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
+            model=os.getenv("GEMINI_ANSWER_MODEL", "gemini-2.5-flash"),
             temperature=0,
             google_api_key=_gemini_key(),
         )
         chain = ANSWER_PROMPT | llm | StrOutputParser()
-        answer = chain.invoke({"question": effective_query, "context": context}).strip()
+        try:
+            answer = chain.invoke({"question": effective_query, "context": context}).strip()
+        except Exception as exc:
+            if _is_quota_error(exc):
+                LOGGER.warning("Gemini answer generation quota exceeded: %s", exc)
+                return _quota_fallback_answer(effective_query, docs, include_file_links)
+            raise
 
         if answer.strip() == NO_SHAREPOINT_MATCH and files and intent == "form":
             answer = "Bạn có thể tham khảo các mẫu phù hợp trên SharePoint:"
