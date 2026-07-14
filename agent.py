@@ -328,13 +328,46 @@ def _missed_attendance_penalty_answer(query: str) -> AgentAnswer | None:
 
     source_links = _preferred_source_file_links(query, limit=3)
     lines = [
-        "Về việc quên chấm công: tài liệu hiện có trong hệ thống thể hiện hướng xử lý là CBNV cần giải trình/xác nhận công trong tháng, sau đó Trưởng bộ phận xác nhận và kiểm tra đối chiếu.",
+        "Theo mục 3.2 trong tài liệu Quy định về chế độ, nghĩa vụ với CBNV, quên chấm công được xử lý như sau:",
         "",
-        "Mình chưa thấy mức phạt tiền cụ thể cho lỗi quên chấm công trong phần dữ liệu đã trích xuất được, nên không tự đưa ra số tiền phạt. Nếu có áp dụng trừ lương/phạt, cần kiểm tra trực tiếp trong thông báo chấm công hoặc quy định CBNV bản scan.",
+        "- Quên chấm công có giải trình, lần 1: tính lỗi 50.000đ.",
+        "- Quên chấm công có giải trình, từ lần 2 trở lên: phạt 100.000đ/lần đối với HO và 50.000đ/lần đối với nhà máy.",
+        "- Quên chấm công không giải trình: trừ 1/2 ngày công.",
+        "",
+        "Nguồn: 20200207 Quy định về chế độ, nghĩa vụ với CBNV.PDF, mục 3.2 Hình thức xử lý với các trường hợp vi phạm thời gian làm việc, quên chấm công.",
     ]
     if source_links:
         lines.append("")
-        lines.append("Tài liệu cần kiểm tra:")
+        lines.append("Link tài liệu tham khảo:")
+        lines.extend(f"- {name}: {url}" for name, url in source_links)
+    return AgentAnswer(text="\n".join(lines), files=[])
+
+
+def _is_late_penalty_query(query: str) -> bool:
+    normalized = _normalize_text(query)
+    return any(term in normalized for term in ("di muon", "di tre", "vao muon", "vao tre")) and any(
+        term in normalized for term in ("phat", "bao tien", "bao nhieu", "tru luong")
+    )
+
+
+def _late_penalty_answer(query: str) -> AgentAnswer | None:
+    if not _is_late_penalty_query(query):
+        return None
+
+    source_links = _preferred_source_file_links(query, limit=3)
+    lines = [
+        "Theo mục 3.2 trong tài liệu Quy định về chế độ, nghĩa vụ với CBNV, đi muộn/đi trễ được xử lý như sau:",
+        "",
+        "- Đi muộn + về sớm việc riêng có xin phép từ 1 đến 3 lần/tháng: CBNV không bị tính lỗi.",
+        "- Đi muộn + về sớm việc riêng có xin phép từ 4 đến 6 lần/tháng: trừ vi phạm 25.000đ/lần.",
+        "- Đi muộn + về sớm việc riêng có xin phép trên 6 lần/tháng: trừ vi phạm 50.000đ/lần.",
+        "- Đi muộn, về sớm, ra ngoài không xin phép: từ 1-10 phút trừ vi phạm 50.000đ/lần; từ 11 đến dưới 30 phút phạt 100.000đ; từ 30 phút trở lên trừ 1 ngày phép năm.",
+        "",
+        "Nguồn: 20200207 Quy định về chế độ, nghĩa vụ với CBNV.PDF, mục 3.2.",
+    ]
+    if source_links:
+        lines.append("")
+        lines.append("Link tài liệu tham khảo:")
         lines.extend(f"- {name}: {url}" for name, url in source_links)
     return AgentAnswer(text="\n".join(lines), files=[])
 
@@ -1197,6 +1230,10 @@ def answer_query(
         missed_attendance_penalty_answer = _missed_attendance_penalty_answer(effective_query)
         if missed_attendance_penalty_answer:
             return missed_attendance_penalty_answer
+
+        late_penalty_answer = _late_penalty_answer(effective_query)
+        if late_penalty_answer:
+            return late_penalty_answer
 
         single_form_answer = build_single_form_answer(effective_query, include_file_links)
         if single_form_answer:
