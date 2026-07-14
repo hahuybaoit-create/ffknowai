@@ -3,10 +3,12 @@ import re
 import io
 import json
 import hashlib
+import logging
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
+from urllib.parse import unquote
 
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 
@@ -37,6 +39,7 @@ load_dotenv()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CHROMA_DB_DIR = str(CHROMA_DB_DIR)
 OCR_CACHE_DIR = APP_DATA_ROOT / "ocr_cache"
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -174,6 +177,7 @@ def _unique_source_links(docs: Iterable[Document], limit: int = 3) -> list[tuple
 
 
 def _normalize_text(text: str) -> str:
+    text = unquote(str(text))
     text = unicodedata.normalize("NFD", text.lower())
     text = "".join(char for char in text if unicodedata.category(char) != "Mn")
     return text.replace("đ", "d")
@@ -311,13 +315,53 @@ def _is_known_missing_system_info_query(query: str) -> bool:
 
 def _preferred_source_terms(query: str) -> list[tuple[str, ...]]:
     normalized = _normalize_text(query)
+    if (
+        "che do nghia vu" in normalized
+        or "nghia vu voi cbnv" in normalized
+        or "20200207 quy dinh ve che do" in normalized
+        or "cbnv.pdf" in normalized
+        or "cbnv" in normalized
+    ):
+        return [("che", "do", "nghia", "vu", "cbnv")]
+    late_penalty_terms = (
+        "di muon",
+        "di tre",
+        "vao muon",
+        "vao tre",
+        "phat bao nhieu",
+        "phat bao tien",
+        "phat tien",
+        "tru luong",
+    )
+    missed_attendance_terms = (
+        "quen cham cong",
+        "quen bam van tay",
+        "quen diem danh",
+        "khong cham cong",
+    )
+    if any(term in normalized for term in missed_attendance_terms):
+        return [
+            ("cham", "cong", "tinh", "luong", "hang", "thang"),
+            ("che", "do", "nghia", "vu", "cbnv"),
+            ("noi", "quy", "cong", "ty"),
+            ("quy", "che", "luong", "thuong", "phuc", "loi"),
+        ]
+    if any(term in normalized for term in late_penalty_terms):
+        return [
+            ("che", "do", "nghia", "vu", "cbnv"),
+            ("cham", "cong", "tinh", "luong", "hang", "thang"),
+            ("noi", "quy", "cong", "ty"),
+            ("quy", "che", "luong", "thuong", "phuc", "loi"),
+        ]
     attendance_terms = (
         "di muon",
         "di tre",
         "vao muon",
         "vao tre",
         "phat bao nhieu",
+        "phat bao tien",
         "phat tien",
+        "tru luong",
         "cham cong",
         "quen cham cong",
         "tinh luong hang thang",
@@ -349,6 +393,21 @@ def _preferred_source_terms(query: str) -> list[tuple[str, ...]]:
     ):
         return [("bo", "khung", "van", "hanh", "phat", "trien", "doi", "tac")]
     return []
+
+
+def _is_document_read_query(query: str) -> bool:
+    normalized = _normalize_text(query)
+    return any(
+        term in normalized
+        for term in (
+            "doc tai lieu",
+            "doc file",
+            "noi dung tai lieu",
+            "tom tat tai lieu",
+            "tai lieu nay noi gi",
+            "link nay noi gi",
+        )
+    )
 
 
 def _ocr_cache_path(file_path: Path) -> Path:
@@ -393,15 +452,17 @@ def _ocr_pdf_with_gemini(file_path: Path) -> list[Document]:
             import google.generativeai as genai
             from PIL import Image
         except ImportError:
+            LOGGER.warning("Gemini OCR skipped because google.generativeai or Pillow is not installed")
             return []
         try:
             api_key = _gemini_key()
             if not api_key:
+                LOGGER.warning("Gemini OCR skipped because GEMINI_API_KEY is missing")
                 return []
             genai.configure(api_key=api_key)
             model = genai.GenerativeModel(os.getenv("GEMINI_OCR_MODEL", "gemini-2.5-flash"))
             reader = PdfReader(str(file_path))
-            max_pages = int(os.getenv("GEMINI_OCR_MAX_PAGES", "12"))
+            max_pages = int(os.getenv("GEMINI_OCR_MAX_PAGES", "20"))
             page_texts = []
             for page_index, page in enumerate(reader.pages[:max_pages]):
                 images = list(getattr(page, "images", []) or [])
@@ -421,7 +482,8 @@ def _ocr_pdf_with_gemini(file_path: Path) -> list[Document]:
                 )
                 page_texts.append((getattr(response, "text", "") or "").strip())
             _save_ocr_cache(file_path, page_texts)
-        except Exception:
+        except Exception as exc:
+            LOGGER.warning("Gemini OCR failed for %s: %s", file_path, exc)
             return []
 
     relative_path = str(file_path.relative_to(DATA_DIR)).replace("\\", "/")
@@ -448,10 +510,37 @@ def _ocr_pdf_with_gemini(file_path: Path) -> list[Document]:
     return docs
 
 
+def _load_pdf_text_documents(file_path: Path) -> list[Document]:
+    reader = PdfReader(str(file_path))
+    docs: list[Document] = []
+    for page_index, page in enumerate(reader.pages):
+        text = page.extract_text() or ""
+        docs.append(
+            Document(
+                page_content=text,
+                metadata={
+                    "source": str(file_path),
+                    "file_name": file_path.name,
+                    "page": page_index,
+                },
+            )
+        )
+    return docs
+
+
+def _has_meaningful_document_text(docs: list[Document]) -> bool:
+    for doc in docs:
+        normalized = _normalize_text(doc.page_content)
+        normalized = normalized.replace("scanned with camscanner", "").strip()
+        if len(normalized) >= 40:
+            return True
+    return False
+
+
 def _load_local_file_documents(file_path: Path) -> list[Document]:
     suffix = file_path.suffix.lower()
     if suffix == ".pdf":
-        docs = PyPDFLoader(str(file_path)).load()
+        docs = _load_pdf_text_documents(file_path)
     elif suffix == ".docx":
         docs = Docx2txtLoader(str(file_path)).load()
     elif suffix == ".txt":
@@ -459,7 +548,7 @@ def _load_local_file_documents(file_path: Path) -> list[Document]:
     else:
         return []
 
-    if suffix == ".pdf" and not any(doc.page_content.strip() for doc in docs):
+    if suffix == ".pdf" and not _has_meaningful_document_text(docs):
         docs = _ocr_pdf_with_gemini(file_path)
 
     relative_path = str(file_path.relative_to(DATA_DIR)).replace("\\", "/")
@@ -562,10 +651,29 @@ def _has_clear_topic(query: str) -> bool:
 
 
 def _resolve_followup_query(query: str, conversation_context: str | None = None) -> str:
-    if not conversation_context or _has_clear_topic(query):
+    if not conversation_context:
         return query
 
     normalized = _normalize_text(query)
+    normalized_context = _normalize_text(conversation_context)
+    penalty_followup_terms = (
+        "phat bao nhieu",
+        "phat bao tien",
+        "bao nhieu tien",
+        "bao tien",
+        "tru luong",
+        "co bi phat",
+        "co bi tru",
+    )
+    if (
+        any(term in normalized for term in penalty_followup_terms)
+        and any(term in normalized_context for term in ("cham cong", "di muon", "di tre", "vao muon", "vao tre"))
+    ):
+        return f"{conversation_context}\nCâu hỏi tiếp theo: {query}"
+
+    if _has_clear_topic(query):
+        return query
+
     followup_terms = (
         "mau",
         "bieu mau",
@@ -580,6 +688,10 @@ def _resolve_followup_query(query: str, conversation_context: str | None = None)
         "nhung gi",
         "gom",
         "them",
+        "bao nhieu",
+        "bao tien",
+        "phat",
+        "tru luong",
     )
     is_short = len(normalized.split()) <= 8
     if is_short or any(term in normalized for term in followup_terms):
@@ -988,10 +1100,11 @@ def answer_query(
             text, files = form_set_answer
             return AgentAnswer(text=text, files=files)
 
-        document_reference_answer = build_document_reference_answer(effective_query, include_file_links)
-        if document_reference_answer:
-            text, files = document_reference_answer
-            return AgentAnswer(text=text, files=files)
+        if not _is_document_read_query(effective_query):
+            document_reference_answer = build_document_reference_answer(effective_query, include_file_links)
+            if document_reference_answer:
+                text, files = document_reference_answer
+                return AgentAnswer(text=text, files=files)
 
         document_shortcut_answer = build_document_shortcut_answer(effective_query, include_file_links)
         if document_shortcut_answer:

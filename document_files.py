@@ -5,7 +5,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import unquote, urlencode
 
 from dotenv import load_dotenv
 
@@ -170,6 +170,7 @@ def _env(name: str, default: str = "") -> str:
 
 
 def _normalize_text(text: str) -> str:
+    text = unquote(str(text))
     text = unicodedata.normalize("NFD", text.lower())
     text = "".join(char for char in text if unicodedata.category(char) != "Mn")
     return text.replace("đ", "d")
@@ -487,6 +488,13 @@ def _dedupe_file_name_key(path: Path) -> str:
 
 def _preferred_reference_terms(query: str) -> tuple[str, ...]:
     normalized = _normalize_text(query)
+    if (
+        "che do nghia vu" in normalized
+        or "nghia vu voi cbnv" in normalized
+        or "cbnv" in normalized
+        or any(term in normalized for term in ("di muon", "di tre", "vao muon", "vao tre", "phat bao nhieu", "phat bao tien"))
+    ):
+        return ("che", "do", "nghia", "vu", "cbnv")
     if (
         "quy trinh phoi hop lien phong ban" in normalized
         or ("phoi hop" in normalized and "phong ban" in normalized)

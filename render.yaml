@@ -58,4 +58,4 @@ services:
       - key: GEMINI_OCR_MODEL
         value: gemini-2.5-flash
       - key: GEMINI_OCR_MAX_PAGES
-        value: "12"
+        value: "20"
