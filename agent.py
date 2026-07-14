@@ -542,6 +542,135 @@ def _ff1666_lookup_answer(query: str) -> AgentAnswer | None:
     return AgentAnswer(text="\n".join(lines), files=[])
 
 
+BU_SALARY_FILE_QUERY = "20260609 co che tinh luong bu"
+
+BU_SALARY_BASE = {
+    "truong_bu": ("Trưởng BU", ("18,000,000", "20,000,000", "22,000,000", "25,000,000")),
+    "pho_bu": ("Phó BU", ("13,000,000", "15,000,000", "17,000,000", "20,000,000")),
+    "sale": ("Sale/Bán hàng", ("8,000,000", "9,000,000", "10,000,000", "12,000,000")),
+    "design": ("Design", ("12,000,000", "13,000,000", "14,000,000", "15,000,000")),
+    "ky_thuat": ("Kỹ thuật", ("12,000,000", "13,000,000", "14,000,000", "15,000,000")),
+    "du_toan": ("Dự toán", ("10,000,000", "11,000,000", "12,000,000")),
+    "mua_hang": ("Mua hàng", ("11,000,000", "12,000,000", "13,000,000")),
+    "giam_sat": ("Giám sát", ("13,000,000", "14,000,000", "15,000,000")),
+}
+
+BU_SALARY_PERFORMANCE = {
+    "truong_bu": (
+        "Lương hiệu suất: [0.8% x Gross Profit].",
+        "Thời điểm chi trả: 100% hàng tháng đối với các đơn hàng ký hợp đồng trong tháng và khách hàng tạm ứng.",
+    ),
+    "pho_bu": (
+        "Lương hiệu suất: [1% x GP công trình triển khai trong tháng].",
+        "Thời điểm chi trả: trước nghiệm thu không quá 60%, nghiệm thu thanh toán tiếp 20%, khách quyết toán thanh toán 20%.",
+    ),
+    "sale": (
+        "Lương hiệu suất: [8% x Giá trị HĐ thiết kế] + [2.5% x Gross Profit đơn hàng thi công].",
+        "Thời điểm chi trả: 100% khi ký hợp đồng, khi khách hàng tạm ứng.",
+    ),
+    "design": (
+        "Lương hiệu suất: [45% x Giá trị HĐ thiết kế] + [2.000đ x số m2 vẽ layout]. Giá trị HĐTK không bao gồm phần M&E.",
+        "Thời điểm chi trả: đơn hàng thiết kế thanh toán 75% khi hoàn thành công việc có xác nhận của khách hàng, 25% còn lại khi hợp đồng thiết kế chuyển đổi sang thi công.",
+    ),
+    "ky_thuat": (
+        "Lương hiệu suất: [25% x Giá trị đơn hàng thiết kế không bao gồm M&E] + [40% x Giá trị bao gồm M&E] + [12.000đ/m2 x số m2 đơn hàng thi công không cần thiết kế] + đơn giá x số lượng sản phẩm nội thất lẻ.",
+        "Phân bổ khâu: HĐ thiết kế gồm khảo sát 15%, vẽ chính 50%, kiểm soát nội bộ 35%; HĐ thi công gồm khảo sát 10%, vẽ chính 45%, kiểm soát nội bộ 15%, kiểm soát OBM trước sản xuất 30%.",
+        "Thời điểm chi trả: đơn hàng thiết kế thanh toán 75% khi hoàn thành có xác nhận khách hàng, 25% còn lại khi chuyển đổi sang thi công; các trường hợp còn lại khi hoàn thành bản vẽ.",
+    ),
+    "du_toan": (
+        "Lương hiệu suất: [40.000đ x số lượng báo giá fail] + [400.000đ x số lượng báo giá chuyển đổi thành công] + [0.1% x Giá trị quyết toán].",
+        "Số lượng báo giá được quy đổi theo Phụ lục 2. Thời điểm chi trả: 100% khi hoàn thành công việc.",
+    ),
+    "mua_hang": (
+        "Lương hiệu suất: [0.8% x GP công trình triển khai trong tháng] + [20% x giá trị tiết kiệm so với dự toán trên tổng đơn khi kết thúc đơn hàng].",
+        "Thời điểm chi trả: trước nghiệm thu không quá 60%, nghiệm thu thanh toán tiếp 20%, khách quyết toán thanh toán 20%.",
+    ),
+    "giam_sat": (
+        "Lương hiệu suất: [3.5% x GP công trình triển khai trong tháng].",
+        "Thời điểm chi trả: trước nghiệm thu không quá 60%, nghiệm thu thanh toán tiếp 20%, khách quyết toán thanh toán 20%.",
+    ),
+}
+
+BU_SALARY_ROLE_ALIASES = {
+    "truong_bu": ("truong bu", "truong khoi bu", "leader bu"),
+    "pho_bu": ("pho bu", "pho khoi bu"),
+    "sale": ("sale", "ban hang", "kinh doanh", "nhan vien sale", "nhan vien kinh doanh"),
+    "design": ("design", "designer", "thiet ke", "nhan vien design", "nhan vien thiet ke"),
+    "ky_thuat": ("ky thuat", "2d", "ban ve", "ve ky thuat"),
+    "du_toan": ("du toan", "bao gia", "nhan vien du toan"),
+    "mua_hang": ("mua hang", "purchase", "purchasing"),
+    "giam_sat": ("giam sat", "supervisor"),
+}
+
+
+def _is_bu_salary_query(query: str) -> bool:
+    normalized = _normalize_text(query)
+    has_salary = "luong" in normalized or "thu nhap" in normalized or "co che" in normalized
+    has_bu_context = " bu" in f" {normalized} " or "khoi bu" in normalized or "co che tinh luong" in normalized
+    has_role = _bu_salary_role_key(query) is not None
+    return has_salary and (has_bu_context or has_role)
+
+
+def _bu_salary_role_key(query: str) -> str | None:
+    normalized = _normalize_text(query)
+    for role_key, aliases in BU_SALARY_ROLE_ALIASES.items():
+        if any(alias in normalized for alias in aliases):
+            return role_key
+    return None
+
+
+def _format_bu_salary_links(lines: list[str]) -> None:
+    source_links = _preferred_source_file_links(BU_SALARY_FILE_QUERY, limit=1)
+    lines.append("")
+    lines.append("Nguồn: 20260609 Cơ chế tính lương BU.doc.")
+    if source_links:
+        lines.append("")
+        lines.append("Link tài liệu tham khảo:")
+        lines.extend(f"- {name}: {url}" for name, url in source_links)
+
+
+def _bu_salary_answer(query: str) -> AgentAnswer | None:
+    if not _is_bu_salary_query(query):
+        return None
+
+    role_key = _bu_salary_role_key(query)
+    if role_key:
+        role_name, levels = BU_SALARY_BASE[role_key]
+        level_labels = [f"Level {index + 1}: {value}đ" for index, value in enumerate(levels)]
+        lines = [
+            f"Theo tài liệu 20260609 Cơ chế tính lương BU.doc, cơ chế lương vị trí {role_name} gồm:",
+            "",
+            f"- Lương cơ bản: {', '.join(level_labels)}.",
+            "- Lương cơ bản tính theo ngày công thực tế được phần mềm chấm công ghi nhận và được đánh giá/xếp lại theo quý.",
+        ]
+        lines.extend(f"- {item}" for item in BU_SALARY_PERFORMANCE[role_key])
+        lines.extend(
+            [
+                "- Nếu nhân viên BU đảm nhiệm nhiều vai trò, nhân viên được hưởng 100% lương hiệu suất và hoa hồng tương ứng với kết quả công việc thực tế phát sinh.",
+            ]
+        )
+        _format_bu_salary_links(lines)
+        return AgentAnswer(text="\n".join(lines), files=[])
+
+    lines = [
+        "Theo tài liệu 20260609 Cơ chế tính lương BU.doc, cơ chế lương BU có các ý chính:",
+        "",
+        "- Phạm vi áp dụng: CBNV Khối BU.",
+        "- Mục đích: minh bạch, công bằng trong tính lương/thưởng; gắn thu nhập với kết quả kinh doanh thực tế của BU; khuyến khích đa nhiệm và hỗ trợ chéo.",
+        "- Công thức thực lĩnh: Lương cơ bản + Lương hiệu suất + Thưởng Comm + Thu nhập khác - Tổng giảm trừ.",
+        "- Lương cơ bản tính theo ngày công thực tế và được đánh giá/xếp lại theo quý.",
+        "- Lương hiệu suất tính theo từng chức năng: Trưởng BU, Phó BU, Sale/Bán hàng, Design, Kỹ thuật, Dự toán, Mua hàng, Giám sát.",
+        "- Cơ chế đa nhiệm: nhân viên BU hưởng 100% lương hiệu suất/hoa hồng theo kết quả thực tế phát sinh; Trưởng/Phó BU hưởng 50% phần lương hiệu suất/hoa hồng tương ứng khi đảm nhiệm thêm vai trò.",
+        "- Thưởng Comm là khoản thưởng từ Gross Profit dự án BU thực hiện, tính theo tháng và theo quý; tỷ lệ hoàn thành Gross Profit càng cao thì tỷ lệ trích thưởng càng lớn.",
+        "",
+        "Lương cơ bản theo vị trí:",
+    ]
+    for role_name, levels in BU_SALARY_BASE.values():
+        lines.append(f"- {role_name}: " + ", ".join(f"Level {index + 1}: {value}đ" for index, value in enumerate(levels)) + ".")
+    _format_bu_salary_links(lines)
+    return AgentAnswer(text="\n".join(lines), files=[])
+
+
 def _preferred_source_terms(query: str) -> list[tuple[str, ...]]:
     normalized = _normalize_text(query)
     if any(term in normalized for term in ("slogan", "gia tri cot loi", "gia tri", "cot loi", "tam nhin", "ff1666", "f1666")):
@@ -766,6 +895,54 @@ def _load_pdf_text_documents(file_path: Path) -> list[Document]:
     return docs
 
 
+def _extract_legacy_doc_text(file_path: Path) -> str:
+    try:
+        raw_text = file_path.read_bytes().decode("utf-16le", errors="ignore")
+    except OSError:
+        return ""
+    raw_text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]+", " ", raw_text)
+    raw_text = " ".join(raw_text.split())
+    useful_start_markers = (
+        "CÔNG TY",
+        "MỤC ĐÍCH",
+        "NỘI DUNG",
+        "QUY ĐỊNH",
+        "THÔNG BÁO",
+        "PHẠM VI",
+    )
+    starts = [raw_text.find(marker) for marker in useful_start_markers if raw_text.find(marker) >= 0]
+    if starts:
+        raw_text = raw_text[min(starts):]
+    return raw_text.strip()
+
+
+def _load_legacy_doc_documents(file_path: Path) -> list[Document]:
+    text = _extract_legacy_doc_text(file_path)
+    if len(_normalize_text(text)) < 80:
+        return []
+    chunk_size = 3500
+    overlap = 350
+    docs: list[Document] = []
+    start = 0
+    while start < len(text):
+        chunk = text[start:start + chunk_size].strip()
+        if chunk:
+            docs.append(
+                Document(
+                    page_content=chunk,
+                    metadata={
+                        "source": str(file_path),
+                        "file_name": file_path.name,
+                        "page": len(docs),
+                    },
+                )
+            )
+        if start + chunk_size >= len(text):
+            break
+        start += chunk_size - overlap
+    return docs
+
+
 def _has_meaningful_document_text(docs: list[Document]) -> bool:
     for doc in docs:
         normalized = _normalize_text(doc.page_content)
@@ -779,6 +956,8 @@ def _load_local_file_documents(file_path: Path) -> list[Document]:
     suffix = file_path.suffix.lower()
     if suffix == ".pdf":
         docs = _load_pdf_text_documents(file_path)
+    elif suffix == ".doc":
+        docs = _load_legacy_doc_documents(file_path)
     elif suffix == ".docx":
         docs = Docx2txtLoader(str(file_path)).load()
     elif suffix == ".txt":
@@ -1470,6 +1649,10 @@ def answer_query(
             tam_phap_management_answer = _tam_phap_management_answer(direct_query)
             if tam_phap_management_answer:
                 return tam_phap_management_answer
+
+            bu_salary_answer = _bu_salary_answer(direct_query)
+            if bu_salary_answer:
+                return bu_salary_answer
 
         single_form_answer = build_single_form_answer(effective_query, include_file_links)
         if single_form_answer:
