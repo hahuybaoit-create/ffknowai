@@ -372,8 +372,36 @@ def _late_penalty_answer(query: str) -> AgentAnswer | None:
     return AgentAnswer(text="\n".join(lines), files=[])
 
 
+def _is_tam_phap_definition_query(query: str) -> bool:
+    normalized = _normalize_text(query)
+    return "tam phap" in normalized and any(term in normalized for term in ("la gi", "nghia la gi", "hieu the nao", "noi dung"))
+
+
+def _tam_phap_definition_answer(query: str) -> AgentAnswer | None:
+    if not _is_tam_phap_definition_query(query):
+        return None
+
+    source_links = _preferred_source_file_links(query, limit=1)
+    lines = [
+        "Theo tài liệu 20260607 FLEXFIT TÂM PHÁP.pdf:",
+        "",
+        "Tâm Pháp là phương pháp tu luyện nội tâm, là phần triển khai thực tiễn và cụ thể hóa FF1666. Tài liệu dùng để giúp mỗi Flexfiter không chỉ hiểu tinh thần tổ chức mà còn hành được, sống được và làm đúng với hệ giá trị, phương pháp đã định.",
+        "",
+        "Nói ngắn gọn: Tâm Pháp là kim chỉ nam định hướng cách tư duy, hành xử và làm việc của toàn thể Flexfiters. Đây không phải khẩu hiệu treo tường, mà là cách FF1666 được thể hiện qua từng quyết định, phản xạ và cách giao tiếp hằng ngày.",
+        "",
+        "Nguồn: 20260607 FLEXFIT TÂM PHÁP.pdf, mục I. Khởi Nguyên Tâm Pháp.",
+    ]
+    if source_links:
+        lines.append("")
+        lines.append("Link tài liệu tham khảo:")
+        lines.extend(f"- {name}: {url}" for name, url in source_links)
+    return AgentAnswer(text="\n".join(lines), files=[])
+
+
 def _preferred_source_terms(query: str) -> list[tuple[str, ...]]:
     normalized = _normalize_text(query)
+    if "tam phap" in normalized or "ff1666" in normalized or "10 chieu" in normalized or "chieu thuc" in normalized:
+        return [("flexfit", "tam", "phap")]
     if (
         "che do nghia vu" in normalized
         or "nghia vu voi cbnv" in normalized
@@ -1234,6 +1262,10 @@ def answer_query(
         late_penalty_answer = _late_penalty_answer(effective_query)
         if late_penalty_answer:
             return late_penalty_answer
+
+        tam_phap_definition_answer = _tam_phap_definition_answer(effective_query)
+        if tam_phap_definition_answer:
+            return tam_phap_definition_answer
 
         single_form_answer = build_single_form_answer(effective_query, include_file_links)
         if single_form_answer:

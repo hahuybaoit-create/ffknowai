@@ -488,6 +488,8 @@ def _dedupe_file_name_key(path: Path) -> str:
 
 def _preferred_reference_terms(query: str) -> tuple[str, ...]:
     normalized = _normalize_text(query)
+    if "tam phap" in normalized or "ff1666" in normalized or "10 chieu" in normalized or "chieu thuc" in normalized:
+        return ("flexfit", "tam", "phap")
     if (
         "che do nghia vu" in normalized
         or "nghia vu voi cbnv" in normalized
