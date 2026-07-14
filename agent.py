@@ -374,7 +374,9 @@ def _late_penalty_answer(query: str) -> AgentAnswer | None:
 
 def _is_tam_phap_definition_query(query: str) -> bool:
     normalized = _normalize_text(query)
-    return "tam phap" in normalized and any(term in normalized for term in ("la gi", "nghia la gi", "hieu the nao", "noi dung"))
+    return "tam phap" in normalized and not any(
+        term in normalized for term in ("slogan", "gia tri", "cot loi", "tam nhin")
+    ) and any(term in normalized for term in ("la gi", "nghia la gi", "hieu the nao", "noi dung"))
 
 
 def _tam_phap_definition_answer(query: str) -> AgentAnswer | None:
@@ -398,9 +400,64 @@ def _tam_phap_definition_answer(query: str) -> AgentAnswer | None:
     return AgentAnswer(text="\n".join(lines), files=[])
 
 
+def _is_ff1666_lookup_query(query: str) -> bool:
+    normalized = _normalize_text(query)
+    return any(term in normalized for term in ("slogan", "gia tri cot loi", "gia tri", "cot loi", "tam nhin", "ff1666"))
+
+
+def _ff1666_lookup_answer(query: str) -> AgentAnswer | None:
+    normalized = _normalize_text(query)
+    if not _is_ff1666_lookup_query(query):
+        return None
+
+    source_links = _preferred_source_file_links("202501 tai lieu huong dan ff1666", limit=1)
+    lines: list[str] = ["Theo tài liệu 202501 Tài liệu hướng dẫn FF1666.pdf:"]
+
+    if "slogan" in normalized:
+        lines.extend(["", "Slogan của Flexfit là: Tiên phong đổi mới, Sống chất cùng Flexfit."])
+    elif "gia tri" in normalized or "cot loi" in normalized:
+        lines.extend(
+            [
+                "",
+                "6 giá trị cốt lõi BICTEC gồm:",
+                "1. Tử tế - Be kind.",
+                "2. Khách hàng là trung tâm - Customer centric.",
+                "3. Nhiệt huyết - Enthusiasm.",
+                "4. Tinh thần đồng đội - Team Spirit.",
+                "5. Hợp tác - Tích hợp - Co-operate.",
+                "6. Đổi mới - Sáng tạo - Innovation.",
+            ]
+        )
+    elif "tam nhin" in normalized:
+        lines.extend(
+            [
+                "",
+                "Tầm nhìn: Số một thị trường Việt Nam về nội thất cho căn hộ chung cư.",
+                "Định hướng 2029: doanh thu 1.000 tỷ, lợi nhuận 150 tỷ; 30.000 gia đình Việt được FF thiết kế thi công và 100.000 sản phẩm được bán qua nền tảng TMĐT.",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "",
+                "FF1666 gồm tầm nhìn, slogan, 6 giá trị cốt lõi BICTEC, 6 định hướng chiến lược và 6 mục tiêu/phương pháp vận hành được dùng để định hướng tư duy và hành động của Flexfiters.",
+            ]
+        )
+
+    lines.append("")
+    lines.append("Nguồn: 202501 Tài liệu hướng dẫn FF1666.pdf.")
+    if source_links:
+        lines.append("")
+        lines.append("Link tài liệu tham khảo:")
+        lines.extend(f"- {name}: {url}" for name, url in source_links)
+    return AgentAnswer(text="\n".join(lines), files=[])
+
+
 def _preferred_source_terms(query: str) -> list[tuple[str, ...]]:
     normalized = _normalize_text(query)
-    if "tam phap" in normalized or "ff1666" in normalized or "10 chieu" in normalized or "chieu thuc" in normalized:
+    if any(term in normalized for term in ("slogan", "gia tri cot loi", "gia tri", "cot loi", "tam nhin", "ff1666")):
+        return [("tai", "lieu", "huong", "dan", "ff1666")]
+    if "tam phap" in normalized or "10 chieu" in normalized or "chieu thuc" in normalized:
         return [("flexfit", "tam", "phap")]
     if (
         "che do nghia vu" in normalized
@@ -725,6 +782,12 @@ def _has_clear_topic(query: str) -> bool:
         "thuc chien",
         "van hanh",
         "doi tac",
+        "slogan",
+        "gia tri",
+        "cot loi",
+        "tam nhin",
+        "tam phap",
+        "ff1666",
         "di muon",
         "di tre",
         "vao muon",
@@ -1262,6 +1325,10 @@ def answer_query(
         late_penalty_answer = _late_penalty_answer(effective_query)
         if late_penalty_answer:
             return late_penalty_answer
+
+        ff1666_lookup_answer = _ff1666_lookup_answer(effective_query)
+        if ff1666_lookup_answer:
+            return ff1666_lookup_answer
 
         tam_phap_definition_answer = _tam_phap_definition_answer(effective_query)
         if tam_phap_definition_answer:
