@@ -1,5 +1,8 @@
 import os
 import re
+import io
+import json
+import hashlib
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +18,7 @@ from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from pypdf import PdfReader
 from document_files import (
     FileReference,
     build_document_reference_answer,
@@ -26,12 +30,13 @@ from document_files import (
     format_file_references,
     manifest_item_for_path,
 )
-from paths import CHROMA_DB_DIR, DATA_DIR
+from paths import APP_DATA_ROOT, CHROMA_DB_DIR, DATA_DIR
 
 load_dotenv()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CHROMA_DB_DIR = str(CHROMA_DB_DIR)
+OCR_CACHE_DIR = APP_DATA_ROOT / "ocr_cache"
 
 
 @dataclass
@@ -222,7 +227,23 @@ def _intent(query: str) -> str:
         return "form"
     if any(term in normalized for term in ("quy trinh", "huong dan", "cac buoc", "thao tac", "lam the nao", "nhu the nao")):
         return "process"
-    if any(term in normalized for term in ("quy dinh", "chinh sach", "quy che", "noi quy", "che do")):
+    if any(
+        term in normalized
+        for term in (
+            "quy dinh",
+            "chinh sach",
+            "quy che",
+            "noi quy",
+            "che do",
+            "di muon",
+            "di tre",
+            "vao muon",
+            "vao tre",
+            "phat",
+            "cham cong",
+            "tinh luong",
+        )
+    ):
         return "policy"
     return "general"
 
@@ -243,6 +264,13 @@ def _is_out_of_scope_query(query: str) -> bool:
         "ho so",
         "bo nghi viec",
         "don xin nghi viec",
+        "di muon",
+        "di tre",
+        "vao muon",
+        "vao tre",
+        "phat",
+        "cham cong",
+        "tinh luong",
     )
     if any(term in normalized for term in allowed_lookup_terms):
         return False
@@ -283,6 +311,23 @@ def _is_known_missing_system_info_query(query: str) -> bool:
 
 def _preferred_source_terms(query: str) -> list[tuple[str, ...]]:
     normalized = _normalize_text(query)
+    attendance_terms = (
+        "di muon",
+        "di tre",
+        "vao muon",
+        "vao tre",
+        "phat bao nhieu",
+        "phat tien",
+        "cham cong",
+        "quen cham cong",
+        "tinh luong hang thang",
+    )
+    if any(term in normalized for term in attendance_terms):
+        return [
+            ("cham", "cong", "tinh", "luong", "hang", "thang"),
+            ("noi", "quy", "cong", "ty"),
+            ("quy", "che", "luong", "thuong", "phuc", "loi"),
+        ]
     if "ho so thanh toan" in normalized:
         return [("khoi", "ho", "huong", "dan", "ho", "so", "thanh", "toan")]
     if "hoa hong" in normalized and "ctv" in normalized:
@@ -306,6 +351,103 @@ def _preferred_source_terms(query: str) -> list[tuple[str, ...]]:
     return []
 
 
+def _ocr_cache_path(file_path: Path) -> Path:
+    stat = file_path.stat()
+    raw = f"{file_path.resolve()}:{stat.st_size}:{stat.st_mtime_ns}".encode("utf-8")
+    return OCR_CACHE_DIR / f"{hashlib.sha1(raw).hexdigest()}.json"
+
+
+def _load_ocr_cache(file_path: Path) -> list[str] | None:
+    cache_path = _ocr_cache_path(file_path)
+    if not cache_path.exists():
+        return None
+    try:
+        data = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    pages = data.get("pages")
+    if not isinstance(pages, list):
+        return None
+    return [str(page) for page in pages]
+
+
+def _save_ocr_cache(file_path: Path, pages: list[str]) -> None:
+    try:
+        OCR_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        _ocr_cache_path(file_path).write_text(
+            json.dumps({"pages": pages}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError:
+        return
+
+
+def _ocr_pdf_with_gemini(file_path: Path) -> list[Document]:
+    if os.getenv("ENABLE_GEMINI_PDF_OCR", "true").strip().lower() in {"0", "false", "no"}:
+        return []
+    cached_pages = _load_ocr_cache(file_path)
+    if cached_pages is not None:
+        page_texts = cached_pages
+    else:
+        try:
+            import google.generativeai as genai
+            from PIL import Image
+        except ImportError:
+            return []
+        try:
+            api_key = _gemini_key()
+            if not api_key:
+                return []
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel(os.getenv("GEMINI_OCR_MODEL", "gemini-2.5-flash"))
+            reader = PdfReader(str(file_path))
+            max_pages = int(os.getenv("GEMINI_OCR_MAX_PAGES", "12"))
+            page_texts = []
+            for page_index, page in enumerate(reader.pages[:max_pages]):
+                images = list(getattr(page, "images", []) or [])
+                if not images:
+                    page_texts.append("")
+                    continue
+                image = Image.open(io.BytesIO(images[0].data))
+                response = model.generate_content(
+                    [
+                        (
+                            "Trích xuất toàn bộ chữ tiếng Việt trong ảnh tài liệu này. "
+                            "Giữ nguyên số tiền, tỷ lệ, bảng, điều khoản và xuống dòng quan trọng. "
+                            "Chỉ trả về nội dung OCR, không giải thích."
+                        ),
+                        image,
+                    ]
+                )
+                page_texts.append((getattr(response, "text", "") or "").strip())
+            _save_ocr_cache(file_path, page_texts)
+        except Exception:
+            return []
+
+    relative_path = str(file_path.relative_to(DATA_DIR)).replace("\\", "/")
+    manifest_item = manifest_item_for_path(relative_path)
+    docs: list[Document] = []
+    for page_index, text in enumerate(page_texts):
+        if not text.strip():
+            continue
+        metadata = {
+            "source": str(file_path),
+            "file_name": file_path.name,
+            "relative_path": relative_path,
+            "page": page_index,
+            "source_type": "sharepoint" if manifest_item else "local",
+            "ocr": True,
+        }
+        if manifest_item.get("web_url"):
+            metadata["web_url"] = manifest_item["web_url"]
+        if manifest_item.get("last_modified"):
+            metadata["last_modified"] = manifest_item["last_modified"]
+        if manifest_item.get("relative_path"):
+            metadata["sharepoint_relative_path"] = manifest_item["relative_path"]
+        docs.append(Document(page_content=text, metadata=metadata))
+    return docs
+
+
 def _load_local_file_documents(file_path: Path) -> list[Document]:
     suffix = file_path.suffix.lower()
     if suffix == ".pdf":
@@ -316,6 +458,9 @@ def _load_local_file_documents(file_path: Path) -> list[Document]:
         docs = TextLoader(str(file_path), encoding="utf-8").load()
     else:
         return []
+
+    if suffix == ".pdf" and not any(doc.page_content.strip() for doc in docs):
+        docs = _ocr_pdf_with_gemini(file_path)
 
     relative_path = str(file_path.relative_to(DATA_DIR)).replace("\\", "/")
     manifest_item = manifest_item_for_path(relative_path)
@@ -338,16 +483,42 @@ def get_preferred_source_documents(query: str) -> list[Document]:
     if not preferred_groups:
         return []
 
-    docs: list[Document] = []
     for source_terms in preferred_groups:
+        docs: list[Document] = []
         for file_path in document_files():
             relative_path = str(file_path.relative_to(DATA_DIR)).replace("\\", "/")
             normalized_path = _normalize_text(relative_path)
             if not all(term in normalized_path for term in source_terms):
                 continue
             docs.extend(_load_local_file_documents(file_path))
+        ranked_docs = _rank_and_filter_documents(docs, query)[:24]
+        if ranked_docs:
+            return ranked_docs
 
-    return _rank_and_filter_documents(docs, query)[:24]
+    return []
+
+
+def _preferred_source_file_links(query: str, limit: int = 5) -> list[tuple[str, str]]:
+    preferred_groups = _preferred_source_terms(query)
+    if not preferred_groups:
+        return []
+
+    links: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for source_terms in preferred_groups:
+        for file_path in document_files():
+            relative_path = str(file_path.relative_to(DATA_DIR)).replace("\\", "/")
+            normalized_path = _normalize_text(relative_path)
+            if not all(term in normalized_path for term in source_terms):
+                continue
+            if relative_path in seen:
+                continue
+            seen.add(relative_path)
+            manifest_item = manifest_item_for_path(relative_path)
+            links.append((file_path.name, str(manifest_item.get("web_url") or relative_path)))
+            if len(links) >= limit:
+                return links
+    return links
 
 
 def _has_clear_topic(query: str) -> bool:
@@ -373,6 +544,13 @@ def _has_clear_topic(query: str) -> bool:
         "thuc chien",
         "van hanh",
         "doi tac",
+        "di muon",
+        "di tre",
+        "vao muon",
+        "vao tre",
+        "phat",
+        "cham cong",
+        "tinh luong",
         "quy trinh",
         "quy dinh",
         "chinh sach",
@@ -756,6 +934,8 @@ def get_relevant_documents(query: str) -> list[Document]:
     preferred_local_docs = get_preferred_source_documents(query)
     if preferred_local_docs:
         return preferred_local_docs
+    if _preferred_source_terms(query):
+        return []
 
     vector_store = get_vector_store()
     retriever = vector_store.as_retriever(
@@ -834,6 +1014,18 @@ def answer_query(
         files = find_related_files(effective_query, docs[:8]) if intent == "form" else []
 
         if not context:
+            source_links = _preferred_source_file_links(effective_query)
+            if source_links:
+                lines = [
+                    "Tôi tìm thấy tài liệu liên quan trên SharePoint, nhưng hiện chưa trích xuất được nội dung chi tiết từ file để trả lời chắc chắn.",
+                    "Bạn có thể mở các tài liệu này để kiểm tra trực tiếp:",
+                ]
+                lines.extend(f"- {name}: {url}" for name, url in source_links)
+                lines.append(
+                    "Nếu các file này là PDF scan, hãy bật OCR Gemini hoặc rebuild lại Vector DB sau khi OCR để bot trả lời được nội dung bên trong."
+                )
+                return AgentAnswer(text="\n".join(lines), files=[])
+
             text = MISSING_SYSTEM_INFO_MESSAGE
             if files:
                 if intent == "form":

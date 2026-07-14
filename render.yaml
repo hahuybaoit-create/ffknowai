@@ -53,3 +53,9 @@ services:
         sync: false
       - key: ADMIN_SYNC_SECRET
         sync: false
+      - key: ENABLE_GEMINI_PDF_OCR
+        value: "true"
+      - key: GEMINI_OCR_MODEL
+        value: gemini-2.5-flash
+      - key: GEMINI_OCR_MAX_PAGES
+        value: "12"
