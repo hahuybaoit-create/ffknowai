@@ -49,6 +49,8 @@ services:
         value: user_send_text,user_send_message,user_send_text_message
       - key: ZALO_MAX_REPLY_CHARS
         value: "1800"
+      - key: ZALO_CONVERSATION_TTL_SECONDS
+        value: "1800"
       - key: ZALO_VERIFY_META_CONTENT
         sync: false
       - key: ADMIN_SYNC_SECRET

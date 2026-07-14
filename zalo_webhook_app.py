@@ -6,7 +6,13 @@ from typing import Any
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
-from zalo_oa import answer_zalo_message, get_token_status, parse_incoming_message, verify_webhook_secret
+from zalo_oa import (
+    answer_zalo_message,
+    get_conversation_status,
+    get_token_status,
+    parse_incoming_message,
+    verify_webhook_secret,
+)
 from document_files import DOWNLOAD_MIME_TYPES, resolve_file_key
 from paths import CHROMA_DB_DIR, DATA_DIR
 
@@ -14,7 +20,7 @@ logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger(__name__)
 
 app = FastAPI(title="FF Know AI - Zalo OA Webhook")
-APP_CODE_VERSION = "context-clean-routing-2026-07-14"
+APP_CODE_VERSION = "per-user-context-2026-07-14"
 SYNC_STATUS: dict[str, Any] = {
     "state": "idle",
     "started_at": None,
@@ -144,6 +150,7 @@ def debugz(
         "flexfit_folder_counts": _flexfit_folder_counts(),
         "zalo_token_set": bool(os.getenv("ZALO_OA_ACCESS_TOKEN")),
         "zalo_token_status": get_token_status(),
+        "zalo_conversation_status": get_conversation_status(),
         "gemini_key_set": bool(os.getenv("GEMINI_API_KEY")),
     }
 

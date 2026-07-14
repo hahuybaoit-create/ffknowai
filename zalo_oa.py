@@ -9,7 +9,7 @@ from typing import Any
 import requests
 from dotenv import load_dotenv
 
-from agent import _resolve_followup_query, answer_query
+from agent import answer_query
 from paths import APP_DATA_ROOT
 
 load_dotenv()
@@ -21,7 +21,15 @@ ZALO_TOKEN_EXPIRED_CODES = {-216, "-216"}
 ZALO_TOKEN_CACHE_FILE = Path(
     os.getenv("ZALO_TOKEN_CACHE_FILE", str(APP_DATA_ROOT / "zalo_tokens.json"))
 ).resolve()
-USER_LAST_QUESTIONS: dict[str, str] = {}
+
+
+@dataclass
+class UserConversation:
+    last_query: str
+    updated_at: float
+
+
+USER_CONVERSATIONS: dict[str, UserConversation] = {}
 
 
 @dataclass
@@ -135,11 +143,61 @@ def get_token_status() -> dict[str, Any]:
     }
 
 
+def get_conversation_status() -> dict[str, Any]:
+    now = time.time()
+    ttl = _conversation_ttl_seconds()
+    expired_user_ids = [
+        user_id
+        for user_id, conversation in USER_CONVERSATIONS.items()
+        if now - conversation.updated_at > ttl
+    ]
+    for user_id in expired_user_ids:
+        USER_CONVERSATIONS.pop(user_id, None)
+
+    return {
+        "active_conversations": len(USER_CONVERSATIONS),
+        "ttl_seconds": ttl,
+    }
+
+
 def _max_reply_chars() -> int:
     try:
         return max(200, int(_env("ZALO_MAX_REPLY_CHARS", "1800")))
     except ValueError:
         return 1800
+
+
+def _conversation_ttl_seconds() -> int:
+    try:
+        return max(60, int(_env("ZALO_CONVERSATION_TTL_SECONDS", "1800")))
+    except ValueError:
+        return 1800
+
+
+def _conversation_context(user_id: str) -> str | None:
+    conversation = USER_CONVERSATIONS.get(user_id)
+    if not conversation:
+        return None
+    if time.time() - conversation.updated_at > _conversation_ttl_seconds():
+        USER_CONVERSATIONS.pop(user_id, None)
+        return None
+    return conversation.last_query
+
+
+def _remember_user_query(user_id: str, query: str) -> None:
+    USER_CONVERSATIONS[user_id] = UserConversation(last_query=query, updated_at=time.time())
+
+
+def _is_clear_context_command(text: str) -> bool:
+    normalized = text.lower().strip()
+    return normalized in {
+        "xóa ngữ cảnh",
+        "xoa ngu canh",
+        "xóa lịch sử",
+        "xoa lich su",
+        "reset",
+        "clear",
+    }
 
 
 def _allowed_user_ids() -> set[str]:
@@ -292,13 +350,19 @@ def answer_zalo_message(message: ZaloIncomingMessage) -> str:
         send_text_message(message.user_id, answer)
         return answer
 
-    conversation_context = USER_LAST_QUESTIONS.get(message.user_id)
-    effective_query = _resolve_followup_query(message.text, conversation_context)
+    if _is_clear_context_command(message.text):
+        USER_CONVERSATIONS.pop(message.user_id, None)
+        answer = "Mình đã xóa ngữ cảnh hội thoại của bạn. Bạn có thể hỏi chủ đề mới."
+        send_text_message(message.user_id, answer)
+        return answer
+
+    conversation_context = _conversation_context(message.user_id)
     answer_result = answer_query(
-        effective_query,
+        message.text,
         include_file_links=True,
+        conversation_context=conversation_context,
     )
-    USER_LAST_QUESTIONS[message.user_id] = effective_query
+    _remember_user_query(message.user_id, message.text)
     answer = answer_result.text
     LOGGER.info(
         "AI answer generated for Zalo user_id=%s answer_len=%s",

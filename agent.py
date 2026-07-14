@@ -491,7 +491,7 @@ def _tam_phap_management_answer(query: str) -> AgentAnswer | None:
 
 def _is_ff1666_lookup_query(query: str) -> bool:
     normalized = _normalize_text(query)
-    return any(term in normalized for term in ("slogan", "gia tri cot loi", "gia tri", "cot loi", "tam nhin", "ff1666"))
+    return any(term in normalized for term in ("slogan", "gia tri cot loi", "gia tri", "cot loi", "tam nhin", "ff1666", "f1666"))
 
 
 def _ff1666_lookup_answer(query: str) -> AgentAnswer | None:
@@ -544,7 +544,7 @@ def _ff1666_lookup_answer(query: str) -> AgentAnswer | None:
 
 def _preferred_source_terms(query: str) -> list[tuple[str, ...]]:
     normalized = _normalize_text(query)
-    if any(term in normalized for term in ("slogan", "gia tri cot loi", "gia tri", "cot loi", "tam nhin", "ff1666")):
+    if any(term in normalized for term in ("slogan", "gia tri cot loi", "gia tri", "cot loi", "tam nhin", "ff1666", "f1666")):
         return [("tai", "lieu", "huong", "dan", "ff1666")]
     if "tam phap" in normalized or "10 chieu" in normalized or "chieu thuc" in normalized:
         return [("flexfit", "tam", "phap")]
@@ -885,6 +885,7 @@ def _has_clear_topic(query: str) -> bool:
         "okr",
         "okrs",
         "ff1666",
+        "f1666",
         "di muon",
         "di tre",
         "vao muon",
@@ -907,6 +908,7 @@ def _resolve_followup_query(query: str, conversation_context: str | None = None)
         return query
 
     normalized = _normalize_text(query)
+    conversation_context = _compact_conversation_context(conversation_context)
     normalized_context = _normalize_text(conversation_context)
     penalty_followup_terms = (
         "phat bao nhieu",
@@ -949,6 +951,22 @@ def _resolve_followup_query(query: str, conversation_context: str | None = None)
     if is_short or any(term in normalized for term in followup_terms):
         return f"{conversation_context}\nCâu hỏi tiếp theo: {query}"
     return query
+
+
+def _compact_conversation_context(conversation_context: str) -> str:
+    lines = [line.strip() for line in str(conversation_context).splitlines() if line.strip()]
+    if not lines:
+        return ""
+
+    compacted: list[str] = []
+    for line in lines:
+        if line.lower().startswith("câu hỏi tiếp theo:"):
+            compacted.append(line.split(":", 1)[1].strip())
+        else:
+            compacted.append(line)
+
+    # Keep only the latest turns so old topics do not dominate a new short question.
+    return "\n".join(compacted[-3:])
 
 
 def _metadata_text(doc: Document) -> str:
@@ -1420,34 +1438,38 @@ def answer_query(
 ) -> AgentAnswer:
     try:
         effective_query = _resolve_followup_query(query, conversation_context)
+        direct_queries = [query]
+        if effective_query != query:
+            direct_queries.append(effective_query)
         if _is_out_of_scope_query(effective_query):
             return AgentAnswer(text=OUT_OF_SCOPE_MESSAGE, files=[])
         if _is_known_missing_system_info_query(effective_query):
             return AgentAnswer(text=MISSING_SYSTEM_INFO_MESSAGE, files=[])
 
-        missed_attendance_penalty_answer = _missed_attendance_penalty_answer(effective_query)
-        if missed_attendance_penalty_answer:
-            return missed_attendance_penalty_answer
+        for direct_query in direct_queries:
+            ff1666_lookup_answer = _ff1666_lookup_answer(direct_query)
+            if ff1666_lookup_answer:
+                return ff1666_lookup_answer
 
-        late_penalty_answer = _late_penalty_answer(effective_query)
-        if late_penalty_answer:
-            return late_penalty_answer
+            missed_attendance_penalty_answer = _missed_attendance_penalty_answer(direct_query)
+            if missed_attendance_penalty_answer:
+                return missed_attendance_penalty_answer
 
-        ff1666_lookup_answer = _ff1666_lookup_answer(effective_query)
-        if ff1666_lookup_answer:
-            return ff1666_lookup_answer
+            late_penalty_answer = _late_penalty_answer(direct_query)
+            if late_penalty_answer:
+                return late_penalty_answer
 
-        tam_phap_definition_answer = _tam_phap_definition_answer(effective_query)
-        if tam_phap_definition_answer:
-            return tam_phap_definition_answer
+            tam_phap_definition_answer = _tam_phap_definition_answer(direct_query)
+            if tam_phap_definition_answer:
+                return tam_phap_definition_answer
 
-        tam_phap_action_answer = _tam_phap_action_answer(effective_query)
-        if tam_phap_action_answer:
-            return tam_phap_action_answer
+            tam_phap_action_answer = _tam_phap_action_answer(direct_query)
+            if tam_phap_action_answer:
+                return tam_phap_action_answer
 
-        tam_phap_management_answer = _tam_phap_management_answer(effective_query)
-        if tam_phap_management_answer:
-            return tam_phap_management_answer
+            tam_phap_management_answer = _tam_phap_management_answer(direct_query)
+            if tam_phap_management_answer:
+                return tam_phap_management_answer
 
         single_form_answer = build_single_form_answer(effective_query, include_file_links)
         if single_form_answer:
