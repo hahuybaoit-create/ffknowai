@@ -14,13 +14,25 @@ logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger(__name__)
 
 app = FastAPI(title="FF Know AI - Zalo OA Webhook")
-APP_CODE_VERSION = "ff1666-routing-2026-07-14"
+APP_CODE_VERSION = "context-clean-routing-2026-07-14"
 SYNC_STATUS: dict[str, Any] = {
     "state": "idle",
     "started_at": None,
     "finished_at": None,
     "error": None,
 }
+
+
+def _flexfit_folder_counts() -> dict[str, int]:
+    flexfit_dir = DATA_DIR / "Flexfit"
+    if not flexfit_dir.exists():
+        return {}
+    counts: dict[str, int] = {}
+    for index in range(1, 7):
+        prefix = f"{index}."
+        folders = [path for path in flexfit_dir.iterdir() if path.is_dir() and path.name.startswith(prefix)]
+        counts[prefix] = sum(1 for folder in folders for path in folder.rglob("*") if path.is_file())
+    return counts
 
 
 def _admin_secret_ok(secret: str | None) -> bool:
@@ -129,6 +141,7 @@ def debugz(
         "chroma_db_files": sorted(path.name for path in CHROMA_DB_DIR.iterdir())
         if CHROMA_DB_DIR.exists()
         else [],
+        "flexfit_folder_counts": _flexfit_folder_counts(),
         "zalo_token_set": bool(os.getenv("ZALO_OA_ACCESS_TOKEN")),
         "zalo_token_status": get_token_status(),
         "gemini_key_set": bool(os.getenv("GEMINI_API_KEY")),

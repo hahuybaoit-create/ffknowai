@@ -400,6 +400,95 @@ def _tam_phap_definition_answer(query: str) -> AgentAnswer | None:
     return AgentAnswer(text="\n".join(lines), files=[])
 
 
+def _is_tam_phap_action_query(query: str) -> bool:
+    normalized = _normalize_text(query)
+    return (
+        "chieu thuc" in normalized
+        or "10 chieu" in normalized
+        or ("cac chieu" in normalized and "tam phap" in normalized)
+        or normalized.strip() in {"cac chieu thuc", "chieu thuc", "10 chieu thuc"}
+    )
+
+
+def _tam_phap_action_answer(query: str) -> AgentAnswer | None:
+    if not _is_tam_phap_action_query(query):
+        return None
+
+    source_links = _preferred_source_file_links("20260607 flexfit tam phap", limit=1)
+    lines = [
+        "Theo tài liệu 20260607 FLEXFIT TÂM PHÁP.pdf, 10 chiêu thức Tâm pháp hành động gồm:",
+        "",
+        "1. Khách hàng là người dẫn đường.",
+        "2. Trọng dụng người tài dựa trên năng lực thực tế.",
+        "3. Nhìn nhận vấn đề như cơ hội.",
+        "4. Tập trung vào kết quả, không bận rộn vô nghĩa.",
+        "5. Coi thay đổi là một phần của sự sống còn.",
+        "6. Làm việc như một đội bóng, không phải một gia đình.",
+        "7. Thực tiễn là tiêu chuẩn, số liệu là tiêu chí.",
+        "8. Đội mạnh hơn người mạnh.",
+        "9. Sự đơn giản là đỉnh cao của sự phức tạp.",
+        "10. Đam mê công việc mình làm là bí quyết thành công.",
+        "",
+        "Nguồn: 20260607 FLEXFIT TÂM PHÁP.pdf, mục II. Tâm pháp hành động.",
+    ]
+    if source_links:
+        lines.append("")
+        lines.append("Link tài liệu tham khảo:")
+        lines.extend(f"- {name}: {url}" for name, url in source_links)
+    return AgentAnswer(text="\n".join(lines), files=[])
+
+
+def _is_tam_phap_management_query(query: str) -> bool:
+    normalized = _normalize_text(query)
+    return any(term in normalized for term in ("bi kip quan ly", "8 bi kip", "magic", "okr", "okrs", "lanh dao 3 trong 1"))
+
+
+def _tam_phap_management_answer(query: str) -> AgentAnswer | None:
+    if not _is_tam_phap_management_query(query):
+        return None
+
+    normalized = _normalize_text(query)
+    source_links = _preferred_source_file_links("20260607 flexfit tam phap", limit=1)
+
+    if "magic" in normalized:
+        lines = [
+            "Theo tài liệu 20260607 FLEXFIT TÂM PHÁP.pdf, mô hình MAGIC dùng để gắn kết nhân sự. Lãnh đạo cần giúp CBNV đạt được:",
+            "",
+            "1. Meaning: cảm nhận được ý nghĩa công việc và giá trị tạo ra cho xã hội, cộng đồng, khách hàng.",
+            "2. Autonomy: có quyền làm chủ công việc, không bị kiểm soát/soi mói quá mức.",
+            "3. Growth: thấy được sự phát triển, có lộ trình, phản hồi, huấn luyện và đào tạo.",
+            "4. Impact: thấy rõ kết quả mình tạo ra có tác động tích cực.",
+            "5. Connection: được kết nối với đồng đội, cấp trên, cộng đồng; cảm thấy được tôn trọng và thuộc về.",
+        ]
+    elif "okr" in normalized or "okrs" in normalized:
+        lines = [
+            "Theo tài liệu 20260607 FLEXFIT TÂM PHÁP.pdf, mô hình OKRs gồm:",
+            "",
+            "- Objectives (Mục tiêu - O): mục tiêu định hướng, mang tính truyền cảm hứng, trả lời câu hỏi “chúng ta muốn đi đâu?”.",
+            "- Key Results (Kết quả then chốt - KRs): kết quả cần đạt trên từng chặng đường để tiến tới mục tiêu; phải đo được, kiểm chứng được và có thời hạn.",
+        ]
+    else:
+        lines = [
+            "Theo tài liệu 20260607 FLEXFIT TÂM PHÁP.pdf, 8 bí kíp quản lý gồm:",
+            "",
+            "1. Lãnh đạo 3 trong 1: Lãnh đạo - Quản lý - Chuyên môn.",
+            "2. Mô hình Tứ phân vị trong quản lý.",
+            "3. Mô hình MAGIC - Gắn kết nhân sự.",
+            "4. Mô hình OKRs.",
+            "5. Không có nhân viên kém, chỉ có lãnh đạo tồi.",
+            "6. Việc của người lãnh đạo là giải phóng 50% tiềm năng còn lại của CBNV.",
+            "7. Dám xử lý người không phù hợp, văn minh và dứt khoát.",
+            "8. Lãnh đạo giỏi tìm ra người kế cận có đủ năng lực thay thế mình.",
+        ]
+
+    lines.extend(["", "Nguồn: 20260607 FLEXFIT TÂM PHÁP.pdf, mục III. Tâm pháp cấp quản lý."])
+    if source_links:
+        lines.append("")
+        lines.append("Link tài liệu tham khảo:")
+        lines.extend(f"- {name}: {url}" for name, url in source_links)
+    return AgentAnswer(text="\n".join(lines), files=[])
+
+
 def _is_ff1666_lookup_query(query: str) -> bool:
     normalized = _normalize_text(query)
     return any(term in normalized for term in ("slogan", "gia tri cot loi", "gia tri", "cot loi", "tam nhin", "ff1666"))
@@ -787,6 +876,14 @@ def _has_clear_topic(query: str) -> bool:
         "cot loi",
         "tam nhin",
         "tam phap",
+        "chieu thuc",
+        "cac chieu",
+        "bi kip",
+        "quan ly",
+        "lanh dao",
+        "magic",
+        "okr",
+        "okrs",
         "ff1666",
         "di muon",
         "di tre",
@@ -1306,6 +1403,16 @@ def _quota_fallback_answer(query: str, docs: list[Document], include_file_links:
     return AgentAnswer(text="\n".join(lines), files=[])
 
 
+def _strip_false_no_match_prefix(answer: str) -> str:
+    lines = answer.splitlines()
+    while lines and lines[0].strip() == NO_SHAREPOINT_MATCH:
+        lines.pop(0)
+        while lines and not lines[0].strip():
+            lines.pop(0)
+    cleaned = "\n".join(lines).strip()
+    return cleaned or answer.strip()
+
+
 def answer_query(
     query: str,
     include_file_links: bool = True,
@@ -1333,6 +1440,14 @@ def answer_query(
         tam_phap_definition_answer = _tam_phap_definition_answer(effective_query)
         if tam_phap_definition_answer:
             return tam_phap_definition_answer
+
+        tam_phap_action_answer = _tam_phap_action_answer(effective_query)
+        if tam_phap_action_answer:
+            return tam_phap_action_answer
+
+        tam_phap_management_answer = _tam_phap_management_answer(effective_query)
+        if tam_phap_management_answer:
+            return tam_phap_management_answer
 
         single_form_answer = build_single_form_answer(effective_query, include_file_links)
         if single_form_answer:
@@ -1403,6 +1518,7 @@ def answer_query(
                 LOGGER.warning("Gemini answer generation quota exceeded: %s", exc)
                 return _quota_fallback_answer(effective_query, docs, include_file_links)
             raise
+        answer = _strip_false_no_match_prefix(answer)
 
         if answer.strip() == NO_SHAREPOINT_MATCH and files and intent == "form":
             answer = "Bạn có thể tham khảo các mẫu phù hợp trên SharePoint:"
