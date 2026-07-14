@@ -313,6 +313,32 @@ def _is_known_missing_system_info_query(query: str) -> bool:
     return any(all(term in normalized for term in pattern) for pattern in missing_patterns)
 
 
+def _is_missed_attendance_penalty_query(query: str) -> bool:
+    normalized = _normalize_text(query)
+    return (
+        "cham cong" in normalized
+        and any(term in normalized for term in ("quen", "khong"))
+        and any(term in normalized for term in ("phat", "bao tien", "bao nhieu", "tru luong"))
+    )
+
+
+def _missed_attendance_penalty_answer(query: str) -> AgentAnswer | None:
+    if not _is_missed_attendance_penalty_query(query):
+        return None
+
+    source_links = _preferred_source_file_links(query, limit=3)
+    lines = [
+        "Về việc quên chấm công: tài liệu hiện có trong hệ thống thể hiện hướng xử lý là CBNV cần giải trình/xác nhận công trong tháng, sau đó Trưởng bộ phận xác nhận và kiểm tra đối chiếu.",
+        "",
+        "Mình chưa thấy mức phạt tiền cụ thể cho lỗi quên chấm công trong phần dữ liệu đã trích xuất được, nên không tự đưa ra số tiền phạt. Nếu có áp dụng trừ lương/phạt, cần kiểm tra trực tiếp trong thông báo chấm công hoặc quy định CBNV bản scan.",
+    ]
+    if source_links:
+        lines.append("")
+        lines.append("Tài liệu cần kiểm tra:")
+        lines.extend(f"- {name}: {url}" for name, url in source_links)
+    return AgentAnswer(text="\n".join(lines), files=[])
+
+
 def _preferred_source_terms(query: str) -> list[tuple[str, ...]]:
     normalized = _normalize_text(query)
     if (
@@ -1167,6 +1193,10 @@ def answer_query(
             return AgentAnswer(text=OUT_OF_SCOPE_MESSAGE, files=[])
         if _is_known_missing_system_info_query(effective_query):
             return AgentAnswer(text=MISSING_SYSTEM_INFO_MESSAGE, files=[])
+
+        missed_attendance_penalty_answer = _missed_attendance_penalty_answer(effective_query)
+        if missed_attendance_penalty_answer:
+            return missed_attendance_penalty_answer
 
         single_form_answer = build_single_form_answer(effective_query, include_file_links)
         if single_form_answer:

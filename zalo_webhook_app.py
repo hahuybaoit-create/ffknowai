@@ -14,6 +14,7 @@ logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger(__name__)
 
 app = FastAPI(title="FF Know AI - Zalo OA Webhook")
+APP_CODE_VERSION = "attendance-fallback-2026-07-14"
 SYNC_STATUS: dict[str, Any] = {
     "state": "idle",
     "started_at": None,
@@ -120,6 +121,7 @@ def debugz(
         raise HTTPException(status_code=401, detail="Invalid webhook secret")
     return {
         "status": "ok",
+        "code_version": APP_CODE_VERSION,
         "data_dir": str(DATA_DIR),
         "data_dir_exists": DATA_DIR.exists(),
         "chroma_db_dir": str(CHROMA_DB_DIR),
