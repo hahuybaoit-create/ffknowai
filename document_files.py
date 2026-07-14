@@ -485,6 +485,35 @@ def _dedupe_file_name_key(path: Path) -> str:
     return "".join(char for char in _normalize_text(path.name) if char.isalnum())
 
 
+def _preferred_reference_terms(query: str) -> tuple[str, ...]:
+    normalized = _normalize_text(query)
+    if (
+        "quy trinh phoi hop lien phong ban" in normalized
+        or ("phoi hop" in normalized and "phong ban" in normalized)
+        or ("phoi hop" in normalized and "lien phong" in normalized)
+    ):
+        return ("quy", "trinh", "phoi", "hop", "lien", "phong", "ban")
+    if "nguyen tac huan luyen" in normalized or "huan luyen thuc chien" in normalized:
+        return ("nguyen", "tac", "huan", "luyen", "thuc", "chien")
+    if (
+        "bo khung van hanh" in normalized
+        or "phat trien doi tac" in normalized
+        or ("van hanh" in normalized and "doi tac" in normalized)
+    ):
+        return ("bo", "khung", "van", "hanh", "phat", "trien", "doi", "tac")
+    return ()
+
+
+def _matches_preferred_reference(path: Path, terms: tuple[str, ...]) -> bool:
+    if not terms:
+        return True
+    normalized_name = _normalize_text(path.name)
+    normalized_path = _normalize_text(_normalize_relative_path(str(path.relative_to(DATA_DIR))))
+    if all(term in normalized_name for term in terms):
+        return True
+    return all(term in normalized_path for term in terms) and path.suffix.lower() == ".pdf"
+
+
 def find_document_references(query: str, limit: int = 3) -> list[FileReference]:
     if not _is_document_reference_query(query):
         return []
@@ -530,12 +559,20 @@ def find_document_references(query: str, limit: int = 3) -> list[FileReference]:
         "co che luong bu",
         "nhan vien mua hang",
         "mua hang",
+        "quy trinh phoi hop lien phong ban",
+        "phoi hop lien phong ban",
+        "phoi hop phong ban",
+        "nguyen tac huan luyen",
+        "huan luyen thuc chien",
+        "bo khung van hanh",
+        "phat trien doi tac",
         "tam ung thanh toan",
         "cong tac",
         "nghi viec",
     )
     relevant_phrases = [phrase for phrase in phrase_boosts if phrase in normalized_query]
     business_unit_aliases = _business_unit_aliases(query)
+    preferred_reference_terms = _preferred_reference_terms(query)
 
     ranked: list[tuple[int, str, str, Path]] = []
     manifest_items = _manifest_by_relative_path()
@@ -544,12 +581,16 @@ def find_document_references(query: str, limit: int = 3) -> list[FileReference]:
         normalized_path = _normalize_text(relative_path)
         if business_unit_aliases and not _matches_business_unit(normalized_path, business_unit_aliases):
             continue
+        if preferred_reference_terms and not _matches_preferred_reference(path, preferred_reference_terms):
+            continue
 
         manifest_item = manifest_items.get(relative_path) or {}
         score = sum(3 for term in terms if term in normalized_path)
         score += sum(15 for phrase in relevant_phrases if phrase in normalized_path)
         if business_unit_aliases:
             score += 40
+        if preferred_reference_terms:
+            score += 50
 
         if "ctv" in normalized_query and "hoa hong" in normalized_query:
             if "hoa hong ctv" not in normalized_path:

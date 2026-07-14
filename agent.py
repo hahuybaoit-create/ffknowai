@@ -289,6 +289,20 @@ def _preferred_source_terms(query: str) -> list[tuple[str, ...]]:
         return [("hoa", "hong", "ctv")]
     if "co che" in normalized and "luong" in normalized:
         return [("co", "che", "tinh", "luong", "bu")]
+    if (
+        "phoi hop lien phong ban" in normalized
+        or ("phoi hop" in normalized and "phong ban" in normalized)
+        or ("phoi hop" in normalized and "lien phong" in normalized)
+    ):
+        return [("quy", "trinh", "phoi", "hop", "lien", "phong", "ban")]
+    if "nguyen tac huan luyen" in normalized or "huan luyen thuc chien" in normalized:
+        return [("nguyen", "tac", "huan", "luyen", "thuc", "chien")]
+    if (
+        "bo khung van hanh" in normalized
+        or "phat trien doi tac" in normalized
+        or ("van hanh" in normalized and "doi tac" in normalized)
+    ):
+        return [("bo", "khung", "van", "hanh", "phat", "trien", "doi", "tac")]
     return []
 
 
@@ -352,6 +366,13 @@ def _has_clear_topic(query: str) -> bool:
         "thu viec",
         "tuyen dung",
         "nhan su",
+        "phoi hop",
+        "phong ban",
+        "lien phong ban",
+        "huan luyen",
+        "thuc chien",
+        "van hanh",
+        "doi tac",
         "quy trinh",
         "quy dinh",
         "chinh sach",
@@ -684,6 +705,13 @@ def get_keyword_documents(vector_store: Chroma, query: str, limit: int = 16) -> 
         "thanh toan",
         "dong phuc",
         "bao ho lao dong",
+        "phoi hop lien phong ban",
+        "phoi hop phong ban",
+        "lien phong ban",
+        "nguyen tac huan luyen",
+        "huan luyen thuc chien",
+        "bo khung van hanh",
+        "phat trien doi tac",
         "thu viec",
         "kpi",
         "luong",
