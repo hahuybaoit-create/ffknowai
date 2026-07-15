@@ -591,6 +591,17 @@ BU_SALARY_PERFORMANCE = {
     ),
 }
 
+BU_SALARY_COMM_RATES = {
+    "truong_bu": ("3.5%", "Trưởng BU (Quản lý)"),
+    "pho_bu": ("2.5%", "Phó BU (Quản lý)"),
+    "sale": ("7.0%", "Bán hàng"),
+    "design": ("3.0%", "Thiết kế (3D)"),
+    "ky_thuat": ("2.5%", "Kỹ thuật (2D)"),
+    "du_toan": ("1.5%", "Dự toán"),
+    "mua_hang": ("2.0%", "Mua hàng"),
+    "giam_sat": ("2.0%", "Giám sát"),
+}
+
 BU_SALARY_ROLE_ALIASES = {
     "truong_bu": ("truong bu", "truong khoi bu", "leader bu"),
     "pho_bu": ("pho bu", "pho khoi bu"),
@@ -644,6 +655,19 @@ def _bu_salary_answer(query: str) -> AgentAnswer | None:
             "- Lương cơ bản tính theo ngày công thực tế được phần mềm chấm công ghi nhận và được đánh giá/xếp lại theo quý.",
         ]
         lines.extend(f"- {item}" for item in BU_SALARY_PERFORMANCE[role_key])
+        comm_rate, comm_label = BU_SALARY_COMM_RATES[role_key]
+        lines.extend(
+            [
+                f"- Thưởng Comm tháng: áp dụng cho đơn hàng thi công, công thức = Tỷ lệ hoa hồng x Gross Profit; chức năng {comm_label} có tỷ lệ {comm_rate}.",
+                "- Thưởng Comm quý: BU đạt thưởng quý khi đạt/vượt chỉ tiêu Gross Profit quý; công thức = Tỷ lệ thưởng x [GP thực tế quý - GP yêu cầu]. Tỷ lệ thưởng quý: 20% khi 100% < TLHT < 120%, 30% khi TLHT >= 120%.",
+            ]
+        )
+        if role_key == "sale":
+            lines.append("- Đối với đơn do Sale tự kiếm, ngoài thưởng Comm trên, Sale được thưởng thêm 5% x GP.")
+        if role_key == "ky_thuat":
+            lines.append("- Comm Kỹ thuật (2D) được chia: nhân viên vẽ chính 50%, kiểm soát HSKT 25%, kiểm soát HSSX 25%.")
+        if role_key == "design":
+            lines.append("- Comm Thiết kế (3D) được chia: nhân viên vẽ chính 80%, kiểm soát nội bộ 20%.")
         lines.extend(
             [
                 "- Nếu nhân viên BU đảm nhiệm nhiều vai trò, nhân viên được hưởng 100% lương hiệu suất và hoa hồng tương ứng với kết quả công việc thực tế phát sinh.",
@@ -662,11 +686,22 @@ def _bu_salary_answer(query: str) -> AgentAnswer | None:
         "- Lương hiệu suất tính theo từng chức năng: Trưởng BU, Phó BU, Sale/Bán hàng, Design, Kỹ thuật, Dự toán, Mua hàng, Giám sát.",
         "- Cơ chế đa nhiệm: nhân viên BU hưởng 100% lương hiệu suất/hoa hồng theo kết quả thực tế phát sinh; Trưởng/Phó BU hưởng 50% phần lương hiệu suất/hoa hồng tương ứng khi đảm nhiệm thêm vai trò.",
         "- Thưởng Comm là khoản thưởng từ Gross Profit dự án BU thực hiện, tính theo tháng và theo quý; tỷ lệ hoàn thành Gross Profit càng cao thì tỷ lệ trích thưởng càng lớn.",
+        "- Thưởng Comm tháng áp dụng cho đơn hàng thi công: Comm tháng = Tỷ lệ hoa hồng x Gross Profit.",
+        "- Thưởng Comm quý: Comm quý = Tỷ lệ thưởng x [GP thực tế quý - GP yêu cầu]; tỷ lệ thưởng là 20% khi 100% < TLHT < 120%, 30% khi TLHT >= 120%.",
         "",
         "Lương cơ bản theo vị trí:",
     ]
     for role_name, levels in BU_SALARY_BASE.values():
         lines.append(f"- {role_name}: " + ", ".join(f"Level {index + 1}: {value}đ" for index, value in enumerate(levels)) + ".")
+    lines.extend(
+        [
+            "",
+            "Tỷ lệ Comm tháng theo chức năng:",
+            "- Trưởng BU (Quản lý): 3.5%; Phó BU (Quản lý): 2.5%; Bán hàng: 7.0%; Dự toán: 1.5%.",
+            "- Thiết kế (3D): 3.0%; Kỹ thuật (2D): 2.5%; Mua hàng: 2.0%; Giám sát: 2.0%.",
+            "- Đơn Sale tự kiếm: ngoài Comm trên, Sale được thưởng thêm 5% x GP.",
+        ]
+    )
     _format_bu_salary_links(lines)
     return AgentAnswer(text="\n".join(lines), files=[])
 
