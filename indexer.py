@@ -2,6 +2,7 @@ import gc
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -32,6 +33,14 @@ OCR_CACHE_DIR = Path(os.getenv("GEMINI_OCR_CACHE_DIR", str(APP_DATA_ROOT / "ocr_
 
 class OcrError(RuntimeError):
     pass
+
+
+def _redact_sensitive_error(exc: Exception) -> str:
+    message = str(exc)
+    api_key = os.getenv("GEMINI_API_KEY", "").strip().strip('"').strip("'")
+    if api_key:
+        message = message.replace(api_key, "<redacted>")
+    return re.sub(r"([?&]key=)[^&\s\"']+", r"\1<redacted>", message)
 
 
 def _clean_text(text: str) -> str:
@@ -187,8 +196,12 @@ def _load_pdf(file_path: Path) -> list[Document]:
         return ocr_documents or documents
     except Exception as exc:
         if _truthy_env("GEMINI_OCR_STRICT", "true"):
-            raise OcrError(f"OCR Gemini that bai cho {file_path.name}: {exc}") from exc
-        print(f"Loi OCR Gemini file {file_path.name}: {exc}. Dung noi dung PDF goc.")
+            safe_error = _redact_sensitive_error(exc)
+            raise OcrError(f"OCR Gemini that bai cho {file_path.name}: {safe_error}") from exc
+        print(
+            f"Loi OCR Gemini file {file_path.name}: {_redact_sensitive_error(exc)}. "
+            "Dung noi dung PDF goc."
+        )
         return documents
 
 
