@@ -44,7 +44,9 @@ def _env(name: str, default: str = "") -> str:
 
 
 def _access_token() -> str:
-    token = _env("ZALO_OA_ACCESS_TOKEN") or _token_cache().get("access_token", "")
+    # Zalo rotates tokens. The persistent cache is normally newer than the
+    # original Render environment value, which cannot be updated at runtime.
+    token = _token_cache().get("access_token", "") or _env("ZALO_OA_ACCESS_TOKEN")
     if not token:
         raise RuntimeError("Missing ZALO_OA_ACCESS_TOKEN")
     return token
@@ -72,43 +74,52 @@ def _save_token_cache(data: dict[str, Any]) -> None:
 
 
 def _refresh_token() -> str:
-    refresh_token = _env("ZALO_OA_REFRESH_TOKEN") or _token_cache().get("refresh_token", "")
+    cache_refresh_token = str(_token_cache().get("refresh_token") or "")
+    env_refresh_token = _env("ZALO_OA_REFRESH_TOKEN")
+    refresh_tokens = list(dict.fromkeys(token for token in (cache_refresh_token, env_refresh_token) if token))
     app_id = _env("ZALO_APP_ID")
     app_secret = _env("ZALO_APP_SECRET")
-    if not refresh_token:
+    if not refresh_tokens:
         raise RuntimeError(
             "Zalo access token expired and ZALO_OA_REFRESH_TOKEN is not configured"
         )
     if not app_id or not app_secret:
         raise RuntimeError("ZALO_APP_ID and ZALO_APP_SECRET are required to refresh Zalo token")
 
-    response = requests.post(
-        ZALO_REFRESH_TOKEN_URL,
-        headers={
-            "secret_key": app_secret,
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
-        data={
-            "app_id": app_id,
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-        },
-        timeout=30,
-    )
-    try:
-        response.raise_for_status()
-    except requests.HTTPError:
-        LOGGER.error(
-            "Zalo refresh token failed. status=%s body=%s",
-            response.status_code,
-            response.text,
-        )
-        raise
-
-    data = response.json()
-    if data.get("error") not in (None, 0, "0"):
-        LOGGER.error("Zalo refresh token returned API error: %s", data)
-        raise RuntimeError(f"Zalo refresh token returned API error: {data}")
+    data: dict[str, Any] = {}
+    last_error: Exception | None = None
+    refresh_token = refresh_tokens[0]
+    for token_index, candidate in enumerate(refresh_tokens):
+        refresh_token = candidate
+        try:
+            response = requests.post(
+                ZALO_REFRESH_TOKEN_URL,
+                headers={
+                    "secret_key": app_secret,
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                data={
+                    "app_id": app_id,
+                    "grant_type": "refresh_token",
+                    "refresh_token": candidate,
+                },
+                timeout=30,
+            )
+            response.raise_for_status()
+            data = response.json()
+            if data.get("error") not in (None, 0, "0"):
+                raise RuntimeError(f"Zalo refresh token returned API error: {data}")
+            break
+        except Exception as exc:
+            last_error = exc
+            LOGGER.warning(
+                "Zalo refresh token candidate %s/%s failed: %s",
+                token_index + 1,
+                len(refresh_tokens),
+                exc,
+            )
+    else:
+        raise RuntimeError("All configured Zalo refresh tokens were rejected") from last_error
 
     access_token = str(data.get("access_token") or "")
     new_refresh_token = str(data.get("refresh_token") or refresh_token)
