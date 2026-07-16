@@ -16,7 +16,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader, TextLoader
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from gemini_api import GoogleGenAIEmbeddings, new_client
 from paths import APP_DATA_ROOT, CHROMA_DB_DIR, CHROMA_DB_TMP_DIR, DATA_DIR
 
 load_dotenv()
@@ -141,35 +141,33 @@ def _ocr_pdf_with_gemini(file_path: Path, page_count: int) -> list[Document]:
             f"{file_path.name} co {page_count} trang, vuot GEMINI_OCR_MAX_PAGES={max_pages}"
         )
 
-    import google.generativeai as genai
-
     api_key = os.getenv("GEMINI_API_KEY", "").strip().strip('"').strip("'")
     if not api_key:
         raise OcrError(f"Chua co GEMINI_API_KEY de OCR {file_path.name}")
 
-    genai.configure(api_key=api_key)
+    client = new_client()
     uploaded = None
     try:
         print(f"PDF scan, dang OCR bang Gemini: {file_path.name} ({page_count} trang)")
-        uploaded = genai.upload_file(path=str(file_path), mime_type="application/pdf")
+        uploaded = client.files.upload(file=str(file_path))
         deadline = time.time() + 120
         while getattr(uploaded, "state", None) and uploaded.state.name == "PROCESSING":
             if time.time() >= deadline:
                 raise TimeoutError("Gemini xu ly file OCR qua 120 giay")
             time.sleep(2)
-            uploaded = genai.get_file(uploaded.name)
+            uploaded = client.files.get(name=uploaded.name)
         if getattr(uploaded, "state", None) and uploaded.state.name == "FAILED":
             raise RuntimeError("Gemini khong xu ly duoc file PDF")
 
-        model = genai.GenerativeModel(os.getenv("GEMINI_OCR_MODEL", "gemini-2.5-flash"))
-        response = model.generate_content(
-            [
+        response = client.models.generate_content(
+            model=os.getenv("GEMINI_OCR_MODEL", "gemini-2.5-flash"),
+            contents=[
                 "Hay OCR va chep lai day du, chinh xac toan bo noi dung tai lieu PDF nay. "
                 "Giu nguyen tieng Viet, so lieu, tieu de, muc va bang bieu; khong tom tat, "
                 "khong binh luan. Danh dau moi trang bang [Trang N].",
                 uploaded,
             ],
-            generation_config={"temperature": 0},
+            config={"temperature": 0},
         )
         text = str(getattr(response, "text", "") or "").strip()
         if not text:
@@ -179,9 +177,12 @@ def _ocr_pdf_with_gemini(file_path: Path, page_count: int) -> list[Document]:
     finally:
         if uploaded is not None:
             try:
-                genai.delete_file(uploaded.name)
+                client.files.delete(name=uploaded.name)
             except Exception:
                 pass
+        close = getattr(client, "close", None)
+        if callable(close):
+            close()
 
 
 def _load_pdf(file_path: Path) -> list[Document]:
@@ -233,7 +234,6 @@ def _source_category(file_path: Path) -> str | None:
 
 def _load_documents() -> list[Document]:
     documents: list[Document] = []
-    ocr_errors: list[str] = []
     files = sorted(path for path in DATA_DIR.rglob("*") if path.is_file())
     manifest_items = _load_sharepoint_manifest()
 
@@ -265,16 +265,14 @@ def _load_documents() -> list[Document]:
             documents.extend(loaded_docs)
             print(f"Da doc: {file_path.relative_to(DATA_DIR)} ({len(loaded_docs)} phan)")
         except OcrError as exc:
-            ocr_errors.append(str(exc))
             print(f"Loi khi doc file {file_path.name}: {exc}")
+            raise RuntimeError(
+                "Khong rebuild index vi OCR PDF scan that bai; giu nguyen Vector DB cu. "
+                f"{exc}"
+            ) from exc
         except Exception as exc:
             print(f"Loi khi doc file {file_path.name}: {exc}")
 
-    if ocr_errors:
-        raise RuntimeError(
-            "Khong rebuild index vi OCR PDF scan that bai; giu nguyen Vector DB cu. "
-            + " | ".join(ocr_errors)
-        )
     return documents
 
 
@@ -303,10 +301,7 @@ def build_index() -> None:
     print(f"Da chia thanh {len(chunks)} chunks.")
 
     gemini_key = os.getenv("GEMINI_API_KEY", "").strip().strip('"').strip("'")
-    embeddings = GoogleGenerativeAIEmbeddings(
-        model="models/gemini-embedding-001",
-        google_api_key=gemini_key,
-    )
+    embeddings = GoogleGenAIEmbeddings(model="gemini-embedding-001")
 
     print("Dang tao embeddings va luu vao ChromaDB tam...")
     vector_store = Chroma(

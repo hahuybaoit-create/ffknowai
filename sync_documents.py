@@ -6,7 +6,7 @@ from indexer import CHROMA_DB_DIR, build_index
 from sharepoint_loader import DEFAULT_DOWNLOAD_DIR, MANIFEST_NAME, download_documents
 
 INDEX_STATE_NAME = "_source_manifest.json"
-INDEX_SCHEMA_VERSION = 2  # v2 adds Gemini OCR for scanned PDFs.
+INDEX_SCHEMA_VERSION = 3  # v3 uses google-genai auth keys for OCR and embeddings.
 
 
 def _index_state_path() -> Path:

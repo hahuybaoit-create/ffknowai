@@ -1,6 +1,5 @@
 import os
 import re
-import io
 import json
 import hashlib
 import logging
@@ -17,9 +16,8 @@ from dotenv import load_dotenv
 from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader, TextLoader
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
-from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from gemini_api import GoogleGenAIEmbeddings, generate_text, new_client
 from pypdf import PdfReader
 from document_files import (
     FileReference,
@@ -845,31 +843,11 @@ def _ocr_pdf_with_gemini(file_path: Path) -> list[Document]:
     if cached_pages is not None:
         page_texts = cached_pages
     else:
+        client = None
+        uploaded = None
         try:
-            import google.generativeai as genai
-            from PIL import Image
-        except ImportError:
-            LOGGER.warning("Gemini OCR skipped because google.generativeai or Pillow is not installed")
-            return []
-        try:
-            api_key = _gemini_key()
-            if not api_key:
-                LOGGER.warning("Gemini OCR skipped because GEMINI_API_KEY is missing")
-                return []
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel(os.getenv("GEMINI_OCR_MODEL", "gemini-2.5-flash"))
-            reader = PdfReader(str(file_path))
-            max_pages = int(os.getenv("GEMINI_OCR_MAX_PAGES", "20"))
-            images = []
-            for page_index, page in enumerate(reader.pages[:max_pages]):
-                page_images = list(getattr(page, "images", []) or [])
-                if not page_images:
-                    continue
-                image = Image.open(io.BytesIO(page_images[0].data))
-                images.append(image)
-
-            if not images:
-                return []
+            client = new_client()
+            uploaded = client.files.upload(file=str(file_path))
 
             prompt = (
                 "Trích xuất toàn bộ chữ tiếng Việt trong các ảnh tài liệu sau theo đúng thứ tự trang. "
@@ -877,16 +855,27 @@ def _ocr_pdf_with_gemini(file_path: Path) -> list[Document]:
                 "Đặc biệt chú ý các nội dung về đi muộn, đi trễ, chấm công, quên chấm công, phạt, trừ lương. "
                 "Trả về theo định dạng:\n--- TRANG 1 ---\n<nội dung>\n--- TRANG 2 ---\n<nội dung>..."
             )
-            response = model.generate_content([prompt, *images])
+            response = client.models.generate_content(
+                model=os.getenv("GEMINI_OCR_MODEL", "gemini-2.5-flash"),
+                contents=[prompt, uploaded],
+                config={"temperature": 0},
+            )
             ocr_text = (getattr(response, "text", "") or "").strip()
             page_texts = [ocr_text] if ocr_text else []
-            if not page_texts:
-                for page_index, page in enumerate(reader.pages[:max_pages]):
-                    page_texts.append("")
             _save_ocr_cache(file_path, page_texts)
         except Exception as exc:
             LOGGER.warning("Gemini OCR failed for %s: %s", file_path, exc)
             return []
+        finally:
+            if client is not None and uploaded is not None:
+                try:
+                    client.files.delete(name=uploaded.name)
+                except Exception:
+                    pass
+            if client is not None:
+                close = getattr(client, "close", None)
+                if callable(close):
+                    close()
 
     relative_path = str(file_path.relative_to(DATA_DIR)).replace("\\", "/")
     manifest_item = manifest_item_for_path(relative_path)
@@ -1445,10 +1434,7 @@ def get_vector_store() -> Chroma:
             f"Chưa có Vector DB tại '{CHROMA_DB_DIR}'. Hãy chạy indexer.py trước."
         )
 
-    embeddings = GoogleGenerativeAIEmbeddings(
-        model="models/gemini-embedding-001",
-        google_api_key=_gemini_key(),
-    )
+    embeddings = GoogleGenAIEmbeddings(model="gemini-embedding-001")
     return Chroma(
         persist_directory=CHROMA_DB_DIR,
         embedding_function=embeddings,
@@ -1745,14 +1731,19 @@ def answer_query(
                 text += "\n" + format_file_references(files, include_file_links)
             return AgentAnswer(text=text, files=files)
 
-        llm = ChatGoogleGenerativeAI(
-            model=os.getenv("GEMINI_ANSWER_MODEL", "gemini-2.5-flash"),
-            temperature=0,
-            google_api_key=_gemini_key(),
-        )
-        chain = ANSWER_PROMPT | llm | StrOutputParser()
         try:
-            answer = chain.invoke({"question": effective_query, "context": context}).strip()
+            prompt_messages = ANSWER_PROMPT.format_messages(
+                question=effective_query,
+                context=context,
+            )
+            prompt_text = "\n\n".join(
+                f"{message.type.upper()}:\n{message.content}" for message in prompt_messages
+            )
+            answer = generate_text(
+                os.getenv("GEMINI_ANSWER_MODEL", "gemini-2.5-flash"),
+                prompt_text,
+                temperature=0,
+            )
         except Exception as exc:
             if _is_quota_error(exc):
                 LOGGER.warning("Gemini answer generation quota exceeded: %s", exc)

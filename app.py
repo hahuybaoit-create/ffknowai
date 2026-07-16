@@ -13,7 +13,7 @@ from paths import CHROMA_DB_DIR, DATA_DIR
 BASE_DIR = Path(__file__).resolve().parent
 LOGO_PATH = BASE_DIR / "logo.png"
 INDEX_STATE_PATH = CHROMA_DB_DIR / "_source_manifest.json"
-INDEX_SCHEMA_VERSION = 2
+INDEX_SCHEMA_VERSION = 3
 MANIFEST_PATH = DATA_DIR / "_sharepoint_manifest.json"
 SUPPORTED_SUFFIXES = {
     ".doc",
