@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger(__name__)
 
 app = FastAPI(title="FF Know AI - Zalo OA Webhook")
-APP_CODE_VERSION = "google-genai-auth-keys-2026-07-16"
+APP_CODE_VERSION = "google-genai-unicode-upload-2026-07-16"
 SYNC_STATUS: dict[str, Any] = {
     "state": "idle",
     "started_at": None,

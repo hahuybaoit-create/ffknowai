@@ -16,7 +16,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader, TextLoader
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
-from gemini_api import GoogleGenAIEmbeddings, new_client
+from gemini_api import GoogleGenAIEmbeddings, new_client, upload_pdf
 from paths import APP_DATA_ROOT, CHROMA_DB_DIR, CHROMA_DB_TMP_DIR, DATA_DIR
 
 load_dotenv()
@@ -149,7 +149,7 @@ def _ocr_pdf_with_gemini(file_path: Path, page_count: int) -> list[Document]:
     uploaded = None
     try:
         print(f"PDF scan, dang OCR bang Gemini: {file_path.name} ({page_count} trang)")
-        uploaded = client.files.upload(file=str(file_path))
+        uploaded = upload_pdf(client, file_path)
         deadline = time.time() + 120
         while getattr(uploaded, "state", None) and uploaded.state.name == "PROCESSING":
             if time.time() >= deadline:

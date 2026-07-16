@@ -1,4 +1,7 @@
 import os
+import shutil
+import tempfile
+from pathlib import Path
 from typing import Iterable
 
 from langchain_core.embeddings import Embeddings
@@ -15,6 +18,28 @@ def new_client():
     if not key:
         raise RuntimeError("Missing GEMINI_API_KEY")
     return genai.Client(api_key=key)
+
+
+def upload_pdf(client, file_path: str | Path):
+    """Upload through an ASCII-only temp path for non-ASCII SharePoint names."""
+    from google.genai import types
+
+    source = Path(file_path)
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(prefix="ff_ocr_", suffix=".pdf", delete=False) as temp:
+            temp_path = Path(temp.name)
+        shutil.copyfile(source, temp_path)
+        return client.files.upload(
+            file=str(temp_path),
+            config=types.UploadFileConfig(
+                display_name="ff-ocr-document.pdf",
+                mime_type="application/pdf",
+            ),
+        )
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
 
 
 class GoogleGenAIEmbeddings(Embeddings):

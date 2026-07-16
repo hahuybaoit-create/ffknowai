@@ -17,7 +17,7 @@ from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader, Te
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
-from gemini_api import GoogleGenAIEmbeddings, generate_text, new_client
+from gemini_api import GoogleGenAIEmbeddings, generate_text, new_client, upload_pdf
 from pypdf import PdfReader
 from document_files import (
     FileReference,
@@ -847,7 +847,7 @@ def _ocr_pdf_with_gemini(file_path: Path) -> list[Document]:
         uploaded = None
         try:
             client = new_client()
-            uploaded = client.files.upload(file=str(file_path))
+            uploaded = upload_pdf(client, file_path)
 
             prompt = (
                 "Trích xuất toàn bộ chữ tiếng Việt trong các ảnh tài liệu sau theo đúng thứ tự trang. "
