@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger(__name__)
 
 app = FastAPI(title="FF Know AI - Zalo OA Webhook")
-APP_CODE_VERSION = "bu-salary-comm-routing-2026-07-14"
+APP_CODE_VERSION = "scanned-pdf-ocr-2026-07-16"
 SYNC_STATUS: dict[str, Any] = {
     "state": "idle",
     "started_at": None,

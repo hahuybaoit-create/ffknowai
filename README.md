@@ -24,7 +24,15 @@ SHAREPOINT_CLIENT_SECRET="..."
 SHAREPOINT_HOST="flexfitcom.sharepoint.com"
 SHAREPOINT_SITE_PATH="/sites/Intranet"
 SHAREPOINT_SITE_NAME="Intranet"
+ENABLE_GEMINI_PDF_OCR=true
+GEMINI_OCR_MODEL="gemini-2.5-flash"
+GEMINI_OCR_MAX_PAGES=40
 ```
+
+`GEMINI_API_KEY` phải là API key hợp lệ của Google AI Studio. Khi bật OCR,
+các PDF scan không có lớp text sẽ được Gemini chép lại và lưu cache trước khi
+tạo Vector DB; nếu OCR lỗi, hệ thống giữ nguyên Vector DB cũ thay vì thay bằng
+một index thiếu nội dung.
 
 Nếu muốn app tự kiểm tra SharePoint khi khởi động, thêm:
 

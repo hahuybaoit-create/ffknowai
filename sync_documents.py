@@ -6,6 +6,7 @@ from indexer import CHROMA_DB_DIR, build_index
 from sharepoint_loader import DEFAULT_DOWNLOAD_DIR, MANIFEST_NAME, download_documents
 
 INDEX_STATE_NAME = "_source_manifest.json"
+INDEX_SCHEMA_VERSION = 2  # v2 adds Gemini OCR for scanned PDFs.
 
 
 def _index_state_path() -> Path:
@@ -27,6 +28,7 @@ def _write_index_state(manifest: dict) -> None:
     state_path.write_text(
         json.dumps(
             {
+                "index_schema_version": INDEX_SCHEMA_VERSION,
                 "sharepoint_updated_at": manifest.get("updated_at"),
                 "file_count": manifest.get("file_count"),
                 "files": manifest.get("files", []),
@@ -59,7 +61,10 @@ def sync_documents(
 
     changed = bool(manifest.get("changed_since_previous_run"))
     index_state = _load_index_state()
-    index_matches_sources = index_state.get("files") == manifest.get("files", [])
+    index_matches_sources = (
+        index_state.get("index_schema_version") == INDEX_SCHEMA_VERSION
+        and index_state.get("files") == manifest.get("files", [])
+    )
     needs_index = force_index or changed or not Path(CHROMA_DB_DIR).exists() or not index_matches_sources
 
     if not needs_index:

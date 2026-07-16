@@ -13,6 +13,7 @@ from paths import CHROMA_DB_DIR, DATA_DIR
 BASE_DIR = Path(__file__).resolve().parent
 LOGO_PATH = BASE_DIR / "logo.png"
 INDEX_STATE_PATH = CHROMA_DB_DIR / "_source_manifest.json"
+INDEX_SCHEMA_VERSION = 2
 MANIFEST_PATH = DATA_DIR / "_sharepoint_manifest.json"
 SUPPORTED_SUFFIXES = {
     ".doc",
@@ -70,7 +71,11 @@ def _load_json(path: Path) -> dict:
 def _index_matches_sources() -> bool:
     manifest = _load_json(MANIFEST_PATH)
     index_state = _load_json(INDEX_STATE_PATH)
-    return bool(manifest) and index_state.get("files") == manifest.get("files", [])
+    return (
+        bool(manifest)
+        and index_state.get("index_schema_version") == INDEX_SCHEMA_VERSION
+        and index_state.get("files") == manifest.get("files", [])
+    )
 
 
 def _normalize_text(text: str) -> str:

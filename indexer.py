@@ -1,4 +1,5 @@
 import gc
+import hashlib
 import json
 import os
 import shutil
@@ -15,7 +16,7 @@ from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader, Te
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from paths import CHROMA_DB_DIR, CHROMA_DB_TMP_DIR, DATA_DIR
+from paths import APP_DATA_ROOT, CHROMA_DB_DIR, CHROMA_DB_TMP_DIR, DATA_DIR
 
 load_dotenv()
 
@@ -26,6 +27,11 @@ if hasattr(sys.stdout, "reconfigure"):
 SUPPORTED_SUFFIXES = {".pdf", ".docx", ".txt", ".xlsx"}
 IGNORED_FILENAMES = {"_sharepoint_manifest.json"}
 MANIFEST_PATH = DATA_DIR / "_sharepoint_manifest.json"
+OCR_CACHE_DIR = Path(os.getenv("GEMINI_OCR_CACHE_DIR", str(APP_DATA_ROOT / "ocr_cache"))).resolve()
+
+
+class OcrError(RuntimeError):
+    pass
 
 
 def _clean_text(text: str) -> str:
@@ -79,11 +85,118 @@ def _load_excel(file_path: Path) -> list[Document]:
     return documents
 
 
+def _truthy_env(name: str, default: str = "false") -> bool:
+    return os.getenv(name, default).lower() in {"1", "true", "yes"}
+
+
+def _pdf_needs_ocr(documents: list[Document]) -> bool:
+    if not documents:
+        return True
+    text = " ".join(doc.page_content or "" for doc in documents).strip()
+    useful_text = text.lower().replace("scanned with camscanner", "").strip()
+    return len(useful_text) < max(120, len(documents) * 40)
+
+
+def _ocr_cache_path(file_path: Path) -> Path:
+    digest = hashlib.sha256(file_path.read_bytes()).hexdigest()
+    return OCR_CACHE_DIR / f"{digest}.json"
+
+
+def _load_cached_ocr(file_path: Path) -> str | None:
+    cache_path = _ocr_cache_path(file_path)
+    if not cache_path.exists():
+        return None
+    try:
+        return str(json.loads(cache_path.read_text(encoding="utf-8")).get("text") or "").strip() or None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _save_cached_ocr(file_path: Path, text: str) -> None:
+    OCR_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    _ocr_cache_path(file_path).write_text(
+        json.dumps({"file_name": file_path.name, "text": text}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _ocr_pdf_with_gemini(file_path: Path, page_count: int) -> list[Document]:
+    cached_text = _load_cached_ocr(file_path)
+    if cached_text:
+        print(f"Dung OCR cache: {file_path.name}")
+        return [Document(page_content=cached_text, metadata={"page": 0, "ocr": "gemini-cache"})]
+
+    max_pages = int(os.getenv("GEMINI_OCR_MAX_PAGES", "40"))
+    if page_count > max_pages:
+        raise OcrError(
+            f"{file_path.name} co {page_count} trang, vuot GEMINI_OCR_MAX_PAGES={max_pages}"
+        )
+
+    import google.generativeai as genai
+
+    api_key = os.getenv("GEMINI_API_KEY", "").strip().strip('"').strip("'")
+    if not api_key:
+        raise OcrError(f"Chua co GEMINI_API_KEY de OCR {file_path.name}")
+
+    genai.configure(api_key=api_key)
+    uploaded = None
+    try:
+        print(f"PDF scan, dang OCR bang Gemini: {file_path.name} ({page_count} trang)")
+        uploaded = genai.upload_file(path=str(file_path), mime_type="application/pdf")
+        deadline = time.time() + 120
+        while getattr(uploaded, "state", None) and uploaded.state.name == "PROCESSING":
+            if time.time() >= deadline:
+                raise TimeoutError("Gemini xu ly file OCR qua 120 giay")
+            time.sleep(2)
+            uploaded = genai.get_file(uploaded.name)
+        if getattr(uploaded, "state", None) and uploaded.state.name == "FAILED":
+            raise RuntimeError("Gemini khong xu ly duoc file PDF")
+
+        model = genai.GenerativeModel(os.getenv("GEMINI_OCR_MODEL", "gemini-2.5-flash"))
+        response = model.generate_content(
+            [
+                "Hay OCR va chep lai day du, chinh xac toan bo noi dung tai lieu PDF nay. "
+                "Giu nguyen tieng Viet, so lieu, tieu de, muc va bang bieu; khong tom tat, "
+                "khong binh luan. Danh dau moi trang bang [Trang N].",
+                uploaded,
+            ],
+            generation_config={"temperature": 0},
+        )
+        text = str(getattr(response, "text", "") or "").strip()
+        if not text:
+            raise RuntimeError("Gemini OCR tra ve noi dung trong")
+        _save_cached_ocr(file_path, text)
+        return [Document(page_content=text, metadata={"page": 0, "ocr": "gemini"})]
+    finally:
+        if uploaded is not None:
+            try:
+                genai.delete_file(uploaded.name)
+            except Exception:
+                pass
+
+
+def _load_pdf(file_path: Path) -> list[Document]:
+    documents = PyPDFLoader(str(file_path)).load()
+    if not _pdf_needs_ocr(documents):
+        return documents
+    if not _truthy_env("ENABLE_GEMINI_PDF_OCR", "true"):
+        print(f"PDF co it/noi dung scan nhung OCR dang tat: {file_path.name}")
+        return documents
+    try:
+        ocr_documents = _ocr_pdf_with_gemini(file_path, len(documents))
+        return ocr_documents or documents
+    except Exception as exc:
+        if _truthy_env("GEMINI_OCR_STRICT", "true"):
+            raise OcrError(f"OCR Gemini that bai cho {file_path.name}: {exc}") from exc
+        print(f"Loi OCR Gemini file {file_path.name}: {exc}. Dung noi dung PDF goc.")
+        return documents
+
+
 def _load_file(file_path: Path) -> list[Document]:
     suffix = file_path.suffix.lower()
 
     if suffix == ".pdf":
-        return PyPDFLoader(str(file_path)).load()
+        return _load_pdf(file_path)
     if suffix == ".docx":
         return Docx2txtLoader(str(file_path)).load()
     if suffix == ".txt":
@@ -107,6 +220,7 @@ def _source_category(file_path: Path) -> str | None:
 
 def _load_documents() -> list[Document]:
     documents: list[Document] = []
+    ocr_errors: list[str] = []
     files = sorted(path for path in DATA_DIR.rglob("*") if path.is_file())
     manifest_items = _load_sharepoint_manifest()
 
@@ -137,9 +251,17 @@ def _load_documents() -> list[Document]:
                     doc.metadata["source_category"] = category
             documents.extend(loaded_docs)
             print(f"Da doc: {file_path.relative_to(DATA_DIR)} ({len(loaded_docs)} phan)")
+        except OcrError as exc:
+            ocr_errors.append(str(exc))
+            print(f"Loi khi doc file {file_path.name}: {exc}")
         except Exception as exc:
             print(f"Loi khi doc file {file_path.name}: {exc}")
 
+    if ocr_errors:
+        raise RuntimeError(
+            "Khong rebuild index vi OCR PDF scan that bai; giu nguyen Vector DB cu. "
+            + " | ".join(ocr_errors)
+        )
     return documents
 
 
