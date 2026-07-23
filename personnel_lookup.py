@@ -175,9 +175,6 @@ def _format_person(row: pd.Series, compact: bool = False) -> list[str]:
     )
     if not compact:
         fields += (
-            ("Loại hình", "employee_type"),
-            ("Trạng thái", "status"),
-            ("Ngày vào làm", "start_date"),
             ("Quản lý trực tiếp", "manager"),
         )
     for label, key in fields:
