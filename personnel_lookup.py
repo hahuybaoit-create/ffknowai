@@ -143,6 +143,7 @@ def _matches_name(name_key: str, search_name: str) -> bool:
 
 def _department_key(value: Any) -> str:
     key = _normalize(value)
+    key = re.sub(r"[^a-z0-9]+", " ", key)
     return re.sub(r"^(?:phong|ban|bo phan)\s+", "", key).strip()
 
 
@@ -155,13 +156,12 @@ def _matches_department(department: Any, search_department: str) -> bool:
         "hr": ("nhan su",),
     }
     candidates = aliases.get(search_key, (search_key,))
-    return any(
-        candidate == department_key
-        or candidate in department_key
-        or department_key in candidate
-        for candidate in candidates
-        if candidate
-    )
+    department_tokens = department_key.split()
+    for candidate in candidates:
+        candidate_tokens = _department_key(candidate).split()
+        if candidate_tokens and all(token in department_tokens for token in candidate_tokens):
+            return True
+    return False
 
 
 def _format_person(row: pd.Series, compact: bool = False) -> list[str]:
@@ -218,5 +218,6 @@ def lookup_personnel_query(query: str) -> PersonnelLookupResult:
         lines = [f"Có {len(matches)} {subject}:" if len(matches) > 1 else f"Thông tin {subject}:", ""]
     for _, row in matches.iterrows():
         lines.extend(_format_person(row, compact=bool(search_department)))
-    lines.extend(["", "Nguồn: Flexfit Danh sách nhân sự, sheet “Tuần này”."])
+        lines.append("")
+    lines.extend(["Nguồn: Flexfit Danh sách nhân sự, sheet “Tuần này”."])
     return PersonnelLookupResult(True, "\n".join(lines))
