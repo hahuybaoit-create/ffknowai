@@ -48,6 +48,7 @@ In the Render service environment settings, fill these values:
 
 ```text
 GEMINI_API_KEY=...
+APP_ACCESS_PASSWORD=...
 SHAREPOINT_CLIENT_ID=...
 SHAREPOINT_TENANT_ID=...
 SHAREPOINT_CLIENT_SECRET=...
@@ -62,6 +63,8 @@ The non-secret SharePoint defaults are already in `render.yaml`:
 SHAREPOINT_HOST=flexfitcom.sharepoint.com
 SHAREPOINT_SITE_PATH=/sites/Intranet
 SHAREPOINT_SITE_NAME=Intranet
+PERSONNEL_GOOGLE_SHEET_URL=https://docs.google.com/spreadsheets/d/.../edit
+PERSONNEL_SHEET_NAME=Tuần này
 ```
 
 ## 4. First deploy behavior

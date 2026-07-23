@@ -18,12 +18,16 @@ Kiểm tra các biến sau trong file `.env`:
 
 ```env
 GEMINI_API_KEY="..."
+REQUIRE_APP_PASSWORD=true
+APP_ACCESS_PASSWORD="..."
 SHAREPOINT_CLIENT_ID="..."
 SHAREPOINT_TENANT_ID="..."
 SHAREPOINT_CLIENT_SECRET="..."
 SHAREPOINT_HOST="flexfitcom.sharepoint.com"
 SHAREPOINT_SITE_PATH="/sites/Intranet"
 SHAREPOINT_SITE_NAME="Intranet"
+PERSONNEL_GOOGLE_SHEET_URL="https://docs.google.com/spreadsheets/d/.../edit"
+PERSONNEL_SHEET_NAME="Tuần này"
 ENABLE_GEMINI_PDF_OCR=true
 GEMINI_OCR_MODEL="gemini-2.5-flash"
 GEMINI_OCR_MAX_PAGES=40
@@ -33,6 +37,14 @@ GEMINI_OCR_MAX_PAGES=40
 các PDF scan không có lớp text sẽ được Gemini chép lại và lưu cache trước khi
 tạo Vector DB; nếu OCR lỗi, hệ thống giữ nguyên Vector DB cũ thay vì thay bằng
 một index thiếu nội dung.
+
+Trên môi trường public như Render, đặt `REQUIRE_APP_PASSWORD=true` và khai báo
+`APP_ACCESS_PASSWORD`. Nếu bật yêu cầu nhưng thiếu mật khẩu, ứng dụng sẽ từ chối
+phục vụ thay vì mở quyền truy cập dữ liệu nội bộ.
+
+Hai biến `PERSONNEL_*` cấu hình nguồn tra cứu nhân sự trực tiếp. Google Sheets
+phải cho phép tải workbook qua liên kết mà không cần đăng nhập; hệ thống chỉ trả các trường
+công việc được khai báo trong `SAFE_COLUMNS` và giữ dữ liệu trong bộ nhớ đệm 10 phút.
 
 Nếu muốn app tự kiểm tra SharePoint khi khởi động, thêm:
 

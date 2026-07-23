@@ -208,6 +208,17 @@ st.set_page_config(page_title="FF - Know AI", page_icon="🤖", layout="wide")
 
 def _require_app_password() -> None:
     expected_password = os.getenv("APP_ACCESS_PASSWORD", "").strip().strip('"').strip("'")
+    password_required = os.getenv("REQUIRE_APP_PASSWORD", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    if password_required and not expected_password:
+        st.error(
+            "Ứng dụng chưa được cấu hình mật khẩu truy cập. "
+            "Vui lòng đặt biến APP_ACCESS_PASSWORD trên Render."
+        )
+        st.stop()
     if not expected_password or st.session_state.get("app_access_granted"):
         return
 
@@ -219,6 +230,42 @@ def _require_app_password() -> None:
             st.rerun()
         st.error("Mật khẩu không đúng hoặc tài khoản chưa được cấp quyền.")
     st.stop()
+
+
+def _has_sharepoint_credentials() -> bool:
+    return all(
+        os.getenv(name, "").strip()
+        for name in (
+            "SHAREPOINT_CLIENT_ID",
+            "SHAREPOINT_TENANT_ID",
+            "SHAREPOINT_CLIENT_SECRET",
+        )
+    )
+
+
+def _render_data_setup() -> None:
+    if not _has_sharepoint_credentials():
+        st.info(
+            "Hãy cấu hình SHAREPOINT_CLIENT_ID, SHAREPOINT_TENANT_ID và "
+            "SHAREPOINT_CLIENT_SECRET trên Render trước khi khởi tạo dữ liệu."
+        )
+        return
+
+    st.info(
+        "Bạn có thể tải tài liệu SharePoint và tạo Vector DB lần đầu. "
+        "Quá trình này có thể mất vài phút."
+    )
+    if st.button("Khởi tạo dữ liệu từ SharePoint", type="primary"):
+        with st.spinner("Đang tải tài liệu và tạo Vector DB..."):
+            try:
+                from sync_documents import sync_documents
+
+                sync_documents(force_index=True)
+            except Exception as exc:
+                st.error(f"Không thể khởi tạo dữ liệu: {exc}")
+            else:
+                st.success("Đã khởi tạo dữ liệu thành công.")
+                st.rerun()
 
 
 _require_app_password()
@@ -251,8 +298,9 @@ if not CHROMA_DB_DIR.exists():
     else:
         st.error(
             "🚨 Cảnh báo: Chưa tìm thấy dữ liệu Vector DB. "
-            "Vui lòng liên hệ quản trị viên để cấu hình dữ liệu."
+            "Vui lòng khởi tạo dữ liệu trước khi sử dụng."
         )
+    _render_data_setup()
     st.stop()
 
 if not DATA_DIR.exists():
@@ -260,6 +308,7 @@ if not DATA_DIR.exists():
         f"🚨 Cảnh báo: Thư mục nguồn `{DATA_DIR}` không tồn tại. "
         "Vui lòng kiểm tra lại bước tải tài liệu."
     )
+    _render_data_setup()
     st.stop()
 
 document_files = _document_files()
@@ -268,6 +317,7 @@ if not document_files:
         f"🚨 Cảnh báo: Thư mục nguồn `{DATA_DIR}` hiện đang trống. "
         "Vui lòng kiểm tra lại bước tải tài liệu."
     )
+    _render_data_setup()
     st.stop()
 
 index_is_current = _index_matches_sources()

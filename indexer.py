@@ -35,6 +35,10 @@ class OcrError(RuntimeError):
     pass
 
 
+class EmptyOcrError(OcrError):
+    pass
+
+
 def _redact_sensitive_error(exc: Exception) -> str:
     message = str(exc)
     api_key = os.getenv("GEMINI_API_KEY", "").strip().strip('"').strip("'")
@@ -171,7 +175,7 @@ def _ocr_pdf_with_gemini(file_path: Path, page_count: int) -> list[Document]:
         )
         text = str(getattr(response, "text", "") or "").strip()
         if not text:
-            raise RuntimeError("Gemini OCR tra ve noi dung trong")
+            raise EmptyOcrError("Gemini OCR tra ve noi dung trong")
         _save_cached_ocr(file_path, text)
         return [Document(page_content=text, metadata={"page": 0, "ocr": "gemini"})]
     finally:
@@ -195,6 +199,12 @@ def _load_pdf(file_path: Path) -> list[Document]:
     try:
         ocr_documents = _ocr_pdf_with_gemini(file_path, len(documents))
         return ocr_documents or documents
+    except EmptyOcrError:
+        print(
+            f"Gemini OCR tra ve rong cho {file_path.name}; "
+            "bo qua OCR file nay va tiep tuc rebuild."
+        )
+        return documents
     except Exception as exc:
         if _truthy_env("GEMINI_OCR_STRICT", "true"):
             safe_error = _redact_sensitive_error(exc)

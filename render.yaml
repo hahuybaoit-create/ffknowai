@@ -17,6 +17,10 @@ services:
         value: /var/data/ff-know-ai
       - key: STREAMLIT_BROWSER_GATHER_USAGE_STATS
         value: "false"
+      - key: REQUIRE_APP_PASSWORD
+        value: "true"
+      - key: APP_ACCESS_PASSWORD
+        sync: false
       - key: AUTO_SYNC_ON_START
         value: "false"
       - key: SHAREPOINT_SKIP_MISSING_FOLDERS
@@ -35,6 +39,10 @@ services:
         value: /sites/Intranet
       - key: SHAREPOINT_SITE_NAME
         value: Intranet
+      - key: PERSONNEL_GOOGLE_SHEET_URL
+        value: https://docs.google.com/spreadsheets/d/1SLIC1gLgD6z7_LhIkxXA8mHX5RBv-cKn/edit?gid=820290981#gid=820290981
+      - key: PERSONNEL_SHEET_NAME
+        value: Tuần này
       - key: ZALO_OA_ACCESS_TOKEN
         sync: false
       - key: ZALO_OA_REFRESH_TOKEN

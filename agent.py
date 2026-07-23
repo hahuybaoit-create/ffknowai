@@ -31,6 +31,7 @@ from document_files import (
     manifest_item_for_path,
 )
 from paths import APP_DATA_ROOT, CHROMA_DB_DIR, DATA_DIR
+from personnel_lookup import lookup_personnel_query
 
 load_dotenv()
 
@@ -1641,6 +1642,10 @@ def answer_query(
         direct_queries = [query]
         if effective_query != query:
             direct_queries.append(effective_query)
+        for direct_query in direct_queries:
+            personnel_result = lookup_personnel_query(direct_query)
+            if personnel_result.handled:
+                return AgentAnswer(text=personnel_result.answer or "", files=[])
         if _is_out_of_scope_query(effective_query):
             return AgentAnswer(text=OUT_OF_SCOPE_MESSAGE, files=[])
         if _is_known_missing_system_info_query(effective_query):
