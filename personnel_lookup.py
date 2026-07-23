@@ -16,11 +16,13 @@ DEFAULT_GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1SLIC1gLgD6z7
 DEFAULT_SHEET_NAME = "Tuần này"
 CACHE_TTL_SECONDS = 600
 
-# Không trả ngày sinh, điện thoại, email cá nhân, CCCD, ngân hàng, địa chỉ hoặc lương.
+# Chỉ trả thông tin phục vụ công việc. Không trả ngày sinh, email cá nhân, CCCD,
+# ngân hàng, địa chỉ hoặc lương.
 SAFE_COLUMNS = {
     "name": "2. Họ và tên*",
     "code": "3. Mã nhân viên*",
     "company_email": "4. Email công ty*",
+    "phone": "5. Số điện thoại*",
     "department": "23. Phòng ban*",
     "position": "24. Vị trí công việc*",
     "employee_type": "25. Loại hình nhân sự*",
@@ -117,15 +119,68 @@ def _extract_name_query(query: str) -> str | None:
     return None
 
 
+def _extract_department_query(query: str) -> str | None:
+    normalized = _normalize(query)
+    patterns = (
+        r"^phong (.+?) co (?:nhung )?ai[?.!]*$",
+        r"^(?:cho (?:toi|minh|em) )?(?:danh sach )?(?:nhan su|nhan vien) (?:cua |thuoc )?phong (.+?)[?.!]*$",
+        r"^(?:nhung )?(?:nhan su|nhan vien) thuoc phong (.+?)[?.!]*$",
+        r"^(?:danh sach )?phong (.+?)[?.!]*$",
+    )
+    for pattern in patterns:
+        match = re.match(pattern, normalized)
+        if match:
+            candidate = match.group(1).strip()
+            if candidate and len(candidate.split()) <= 8:
+                return candidate
+    return None
+
+
 def _matches_name(name_key: str, search_name: str) -> bool:
     search_tokens, name_tokens = search_name.split(), name_key.split()
     return bool(search_tokens) and (search_tokens[0] in name_tokens if len(search_tokens) == 1 else all(token in name_tokens for token in search_tokens))
 
 
-def _format_person(row: pd.Series) -> list[str]:
+def _department_key(value: Any) -> str:
+    key = _normalize(value)
+    return re.sub(r"^(?:phong|ban|bo phan)\s+", "", key).strip()
+
+
+def _matches_department(department: Any, search_department: str) -> bool:
+    department_key = _department_key(department)
+    search_key = _department_key(search_department)
+    aliases = {
+        "it": ("it", "cong nghe", "cong nghe thong tin"),
+        "cntt": ("it", "cong nghe", "cong nghe thong tin"),
+        "hr": ("nhan su",),
+    }
+    candidates = aliases.get(search_key, (search_key,))
+    return any(
+        candidate == department_key
+        or candidate in department_key
+        or department_key in candidate
+        for candidate in candidates
+        if candidate
+    )
+
+
+def _format_person(row: pd.Series, compact: bool = False) -> list[str]:
     name, code = _clean_cell(row["name"]), _clean_cell(row["code"])
     lines = [f"- **{name}**" + (f" ({code})" if code else "")]
-    for label, key in (("Phòng ban", "department"), ("Vị trí", "position"), ("Email công ty", "company_email"), ("Loại hình", "employee_type"), ("Trạng thái", "status"), ("Ngày vào làm", "start_date"), ("Quản lý trực tiếp", "manager")):
+    fields = (
+        ("Vị trí", "position"),
+        ("Phòng ban", "department"),
+        ("Email công ty", "company_email"),
+        ("Số điện thoại", "phone"),
+    )
+    if not compact:
+        fields += (
+            ("Loại hình", "employee_type"),
+            ("Trạng thái", "status"),
+            ("Ngày vào làm", "start_date"),
+            ("Quản lý trực tiếp", "manager"),
+        )
+    for label, key in fields:
         value = _clean_cell(row[key])
         if value:
             lines.append(f"  - {label}: {value}")
@@ -134,17 +189,34 @@ def _format_person(row: pd.Series) -> list[str]:
 
 def lookup_personnel_query(query: str) -> PersonnelLookupResult:
     search_name = _extract_name_query(query)
-    if not search_name:
+    search_department = _extract_department_query(query) if not search_name else None
+    if not search_name and not search_department:
         return PersonnelLookupResult(handled=False)
     try:
         people = _load_people()
     except PersonnelLookupError:
         return PersonnelLookupResult(True, "Chưa thể truy cập Flexfit Danh sách nhân sự lúc này. Bạn vui lòng thử lại sau.")
-    matches = people.loc[people["_name_key"].map(lambda name: _matches_name(name, search_name))]
+    if search_name:
+        matches = people.loc[people["_name_key"].map(lambda name: _matches_name(name, search_name))]
+        subject = f"nhân sự phù hợp với “{search_name}”"
+    else:
+        matches = people.loc[
+            people["department"].map(
+                lambda department: _matches_department(department, search_department or "")
+            )
+        ]
+        subject = f"nhân sự thuộc phòng ban “{search_department}”"
     if matches.empty:
-        return PersonnelLookupResult(True, f"Không tìm thấy nhân sự phù hợp với “{search_name}” trong sheet “Tuần này” của Flexfit Danh sách nhân sự.")
-    lines = [f"Có {len(matches)} nhân sự khớp với “{search_name}”:" if len(matches) > 1 else f"Thông tin nhân sự khớp với “{search_name}”:", ""]
+        if search_name:
+            message = f"Không tìm thấy nhân sự phù hợp với “{search_name}”."
+        else:
+            message = f"Không tìm thấy nhân sự hoặc phòng ban phù hợp với “{search_department}”."
+        return PersonnelLookupResult(True, message + " Nguồn đã tra cứu: Flexfit Danh sách nhân sự, sheet “Tuần này”.")
+    if search_department:
+        lines = [f"Có {len(matches)} {subject}:", ""]
+    else:
+        lines = [f"Có {len(matches)} {subject}:" if len(matches) > 1 else f"Thông tin {subject}:", ""]
     for _, row in matches.iterrows():
-        lines.extend(_format_person(row))
+        lines.extend(_format_person(row, compact=bool(search_department)))
     lines.extend(["", "Nguồn: Flexfit Danh sách nhân sự, sheet “Tuần này”."])
     return PersonnelLookupResult(True, "\n".join(lines))

@@ -99,12 +99,13 @@ Kiểm tra lần lượt:
 3. `Bảo là ai?` trả thông tin từ danh sách nhân sự, không còn trả
    `Thông tin này hiện chưa có trong hệ thống`.
 4. Câu hỏi không liên quan nhân sự vẫn đi qua luồng chatbot cũ.
-5. Không có thông tin nhạy cảm như số điện thoại cá nhân, CCCD, tài khoản ngân
-   hàng, địa chỉ hoặc lương trong câu trả lời.
+5. Số điện thoại được hiển thị khi cột `5. Số điện thoại*` có dữ liệu.
+6. Không có các thông tin khác như email cá nhân, CCCD, tài khoản ngân hàng,
+   địa chỉ hoặc lương trong câu trả lời.
+7. Kiểm tra thêm truy vấn phòng ban, ví dụ `Những nhân sự thuộc phòng Nhân sự`.
 
 ## 6. Rollback nếu có lỗi
 
 Trong Render, mở **Events**, tìm deploy đang chạy ổn trước đó và chọn
 **Rollback**. Sau đó kiểm tra Logs và URL production. Không xóa persistent disk;
 disk đang giữ tài liệu và Vector DB của phiên bản cũ.
-

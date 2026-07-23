@@ -45,6 +45,9 @@ phục vụ thay vì mở quyền truy cập dữ liệu nội bộ.
 Hai biến `PERSONNEL_*` cấu hình nguồn tra cứu nhân sự trực tiếp. Google Sheets
 phải cho phép tải workbook qua liên kết mà không cần đăng nhập; hệ thống chỉ trả các trường
 công việc được khai báo trong `SAFE_COLUMNS` và giữ dữ liệu trong bộ nhớ đệm 10 phút.
+Tra cứu hỗ trợ tên nhân sự và phòng ban; số điện thoại được hiển thị khi cột
+`5. Số điện thoại*` có dữ liệu. Các trường như email cá nhân, CCCD, ngân hàng,
+địa chỉ và lương không được đưa vào kết quả.
 
 Nếu muốn app tự kiểm tra SharePoint khi khởi động, thêm:
 
