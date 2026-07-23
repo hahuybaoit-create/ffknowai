@@ -102,6 +102,15 @@ OUT_OF_SCOPE_MESSAGE = (
     "FF Know AI được hỗ trợ để tra cứu thông tin nội bộ của FlexFit, "
     "vui lòng đặt câu hỏi liên quan khác."
 )
+LEAVE_POLICY_TITLE = "Quy định các chế độ ngày nghỉ và thủ tục xin nghỉ"
+LEAVE_POLICY_SOURCE_TERMS = ("che", "do", "nghia", "vu", "cbnv")
+LEAVE_POLICY_URL = (
+    "https://flexfitcom.sharepoint.com/:b:/r/sites/Intranet/Shared%20Documents/"
+    "Flexfit/1.%20Quy%20ch%E1%BA%BF,%20quy%20%C4%91%E1%BB%8Bnh%20chung%20"
+    "to%C3%A0n%20C%C3%B4ng%20ty/20200207%20Quy%20%C4%91%E1%BB%8Bnh%20v%E1%BB%81%20"
+    "ch%E1%BA%BF%20%C4%91%E1%BB%99,%20ngh%C4%A9a%20v%E1%BB%A5%20v%E1%BB%9Bi%20"
+    "CBNV.PDF?csf=1&web=1&e=fM5PqU"
+)
 
 
 def _gemini_key() -> str:
@@ -705,8 +714,35 @@ def _bu_salary_answer(query: str) -> AgentAnswer | None:
     return AgentAnswer(text="\n".join(lines), files=[])
 
 
+def _is_leave_policy_query(query: str) -> bool:
+    normalized = _normalize_text(query)
+    leave_terms = (
+        "nghi phep",
+        "phep nam",
+        "ngay phep",
+        "che do nghi",
+        "thu tuc xin nghi",
+        "quy trinh xin nghi",
+        "don xin nghi phep",
+        "xin nghi phep",
+    )
+    return any(term in normalized for term in leave_terms)
+
+
+def _leave_policy_no_match_answer() -> AgentAnswer:
+    return AgentAnswer(
+        text=(
+            f"Không tìm thấy nội dung liên quan trong tài liệu “{LEAVE_POLICY_TITLE}”.\n\n"
+            f"Tài liệu tham khảo: {LEAVE_POLICY_URL}"
+        ),
+        files=[],
+    )
+
+
 def _preferred_source_terms(query: str) -> list[tuple[str, ...]]:
     normalized = _normalize_text(query)
+    if _is_leave_policy_query(query):
+        return [LEAVE_POLICY_SOURCE_TERMS]
     if any(term in normalized for term in ("slogan", "gia tri cot loi", "gia tri", "cot loi", "tam nhin", "ff1666", "f1666")):
         return [("tai", "lieu", "huong", "dan", "ff1666")]
     if "tam phap" in normalized or "10 chieu" in normalized or "chieu thuc" in normalized:
@@ -807,9 +843,8 @@ def _is_document_read_query(query: str) -> bool:
 
 
 def _ocr_cache_path(file_path: Path) -> Path:
-    stat = file_path.stat()
-    raw = f"{file_path.resolve()}:{stat.st_size}:{stat.st_mtime_ns}".encode("utf-8")
-    return OCR_CACHE_DIR / f"{hashlib.sha1(raw).hexdigest()}.json"
+    digest = hashlib.sha256(file_path.read_bytes()).hexdigest()
+    return OCR_CACHE_DIR / f"{digest}.json"
 
 
 def _load_ocr_cache(file_path: Path) -> list[str] | None:
@@ -821,16 +856,21 @@ def _load_ocr_cache(file_path: Path) -> list[str] | None:
     except (OSError, json.JSONDecodeError):
         return None
     pages = data.get("pages")
-    if not isinstance(pages, list):
-        return None
-    return [str(page) for page in pages]
+    if isinstance(pages, list):
+        return [str(page) for page in pages]
+    text = str(data.get("text") or "").strip()
+    return [text] if text else None
 
 
 def _save_ocr_cache(file_path: Path, pages: list[str]) -> None:
     try:
         OCR_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         _ocr_cache_path(file_path).write_text(
-            json.dumps({"pages": pages}, ensure_ascii=False, indent=2),
+            json.dumps(
+                {"pages": pages, "text": "\n\n".join(pages)},
+                ensure_ascii=False,
+                indent=2,
+            ),
             encoding="utf-8",
         )
     except OSError:
@@ -1717,6 +1757,8 @@ def answer_query(
         files = find_related_files(effective_query, docs[:8]) if intent == "form" else []
 
         if not context:
+            if _is_leave_policy_query(effective_query):
+                return _leave_policy_no_match_answer()
             source_links = _preferred_source_file_links(effective_query)
             if source_links:
                 lines = [
@@ -1759,6 +1801,8 @@ def answer_query(
         if answer.strip() == NO_SHAREPOINT_MATCH and files and intent == "form":
             answer = "Bạn có thể tham khảo các mẫu phù hợp trên SharePoint:"
         elif answer.strip() == NO_SHAREPOINT_MATCH:
+            if _is_leave_policy_query(effective_query):
+                return _leave_policy_no_match_answer()
             return AgentAnswer(text=MISSING_SYSTEM_INFO_MESSAGE, files=[])
 
         sources = _unique_sources(docs[:6])
